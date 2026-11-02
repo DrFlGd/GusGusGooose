@@ -131,26 +131,32 @@ export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
     }
     if (inward < faces.length * 0.9) { reject(faces, `inward ${inward}/${faces.length} r ${rMean.toFixed(2)}`); continue; }
 
-    // which end is the floor? a neighbouring face whose normal runs along the
-    // axis and whose centroid lies inside the cylinder (the rim around the
-    // mouth also has axis-aligned normals, but sits outside the radius)
+    // which end is the floor? Sum the area of neighbouring axis-aligned faces
+    // that lie inside the radius at each end of the wall. The floor disc has
+    // about πr² of them; the rim around the mouth only contributes slivers
+    // whose centroids barely cross the circle.
     const wallSet = new Set(faces);
-    let floorT = NaN;
+    const seen = new Set<number>();
+    let areaLow = 0, areaHigh = 0;
     for (const f of faces) {
       for (const g of neighbours(f)) {
-        if (wallSet.has(g)) continue;
+        if (wallSet.has(g) || seen.has(g)) continue;
+        seen.add(g);
         const n: V3 = [normals[g * 3], normals[g * 3 + 1], normals[g * 3 + 2]];
         if (Math.abs(dot(n, axis)) < 0.9) continue;
         const d = sub([centroids[g * 3], centroids[g * 3 + 1], centroids[g * 3 + 2]], c0);
         const t = dot(d, axis);
         const r = norm(sub(d, scale(axis, t)));
-        if (r < rMean * 0.95) { floorT = t; break; }
+        if (r > rMean * 0.95) continue;
+        const area = triArea(P, T, g);
+        if (Math.abs(t - tMin) < Math.abs(t - tMax)) areaLow += area; else areaHigh += area;
       }
-      if (!Number.isNaN(floorT)) break;
     }
-    if (Number.isNaN(floorT)) { reject(faces, `no floor, r ${rMean.toFixed(2)} depth ${(tMax - tMin).toFixed(2)} at ${c0.map((v) => v.toFixed(1))}`); continue; } // open tube, not a pocket
+    const disc = Math.PI * rMean * rMean;
+    if (Math.max(areaLow, areaHigh) < disc * 0.3) { reject(faces, `no floor (areas ${areaLow.toFixed(1)}/${areaHigh.toFixed(1)} of ${disc.toFixed(1)}), r ${rMean.toFixed(2)} depth ${(tMax - tMin).toFixed(2)} at ${c0.map((v) => v.toFixed(1))}`); continue; } // open tube, not a pocket
     // orient axis so it points from the floor toward the mouth
-    const out = Math.abs(floorT - tMin) < Math.abs(floorT - tMax) ? axis : scale(axis, -1);
+    if (debug) console.log(`  candidate r ${rMean.toFixed(2)} floor areas low ${areaLow.toFixed(1)} high ${areaHigh.toFixed(1)} tMin ${tMin.toFixed(2)} tMax ${tMax.toFixed(2)} axis ${axis.map((v) => v.toFixed(2))}`);
+    const out = areaLow > areaHigh ? axis : scale(axis, -1);
     const tFloor = out === axis ? tMin : -tMax;
     const tMouth = out === axis ? tMax : -tMin;
     voids.push({
@@ -188,6 +194,13 @@ function cylinderAxis(faces: number[], normals: Float64Array): V3 | null {
     v = scale(w, 1 / l) as V3;
   }
   return v;
+}
+
+function triArea(P: Float32Array, T: Uint32Array, f: number): number {
+  const a = T[f * 3] * 3, b = T[f * 3 + 1] * 3, c = T[f * 3 + 2] * 3;
+  const u: V3 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]];
+  const v: V3 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+  return norm([u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]) / 2;
 }
 
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

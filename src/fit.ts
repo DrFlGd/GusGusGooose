@@ -130,7 +130,13 @@ export async function fitAccessory(
   const pad = profile.clearance * 2 + 1;
   const size: V3 = [bb.max[0] - bb.min[0] + 2 * pad, bb.max[1] - bb.min[1] + 2 * pad, bb.max[2] - bb.min[2] + 2 * pad];
   const cropBox = Manifold.cube(size, false).translate(bb.min[0] - pad, bb.min[1] - pad, bb.min[2] - pad);
-  const nearby = goose.intersect(cropBox);
+  // the goose's own magnet voids are filled first, so the accessory is carved
+  // against the surface rather than growing plugs down into the holes
+  const fillers = Object.values(profile.points).map((p) =>
+    Manifold.cylinder(p.depth + 0.05, p.diameter / 2 + 0.05, p.diameter / 2 + 0.05, 64, false)
+      .translate(0, 0, -p.depth - 0.05)
+      .transform(frameAt(p.center, p.axis) as any));
+  const nearby = Manifold.union([goose, ...fillers]).intersect(cropBox);
   const grown = offsetApprox(Manifold, nearby, profile.clearance);
 
   // 3. carve the goose out of the accessory
@@ -140,17 +146,22 @@ export async function fitAccessory(
   const spec = placement.pocket ?? {};
   const depth = (spec.thickness ?? profile.magnetThickness ?? pt.depth) + (spec.axialClearance ?? profile.pocketAxialClearance);
   const radius = (spec.diameter ?? pt.diameter) / 2 + (spec.radialClearance ?? profile.pocketRadialClearance);
-  const reach = placement.sink + profile.clearance + 1; // start well inside the goose side
+  // the pocket is measured from the accessory's mating face, which sits one
+  // clearance above the goose void mouth; it also reaches back through any
+  // material below that face so the opening is always clear
+  const reach = placement.sink + profile.clearance + 1;
   if (!spec.none) {
     const pocket = Manifold.cylinder(depth + reach, radius, radius, 64, false)
       .translate(0, 0, -reach)
-      .transform(frameAt(pt.center, pt.axis) as any);
+      .transform(frameAt(add(pt.center, scale(pt.axis, profile.clearance)), pt.axis) as any);
     fitted = fitted.subtract(pocket);
   }
 
-  // 5. checks
+  // 5. drop slivers (under 1 mm³, from the offset approximation), then check
   const parts = fitted.decompose();
-  const bodies = parts.length;
+  const kept = parts.filter((p) => p.volume() >= 1);
+  if (kept.length < parts.length) fitted = kept.length ? Manifold.union(kept) : fitted;
+  const bodies = kept.length;
   if (bodies === 0) warnings.push('nothing left after the cut: the accessory sits entirely inside the goose');
   if (bodies > 1) warnings.push(`result is ${bodies} separate bodies; the cut split the accessory`);
   const volumeAfter = fitted.volume();
@@ -158,7 +169,7 @@ export async function fitAccessory(
   // crude floor-thickness check: is there material just beyond the pocket floor?
   const probe = Manifold.cylinder(0.8, radius * 0.8, radius * 0.8, 32, false)
     .translate(0, 0, depth)
-    .transform(frameAt(pt.center, pt.axis) as any);
+    .transform(frameAt(add(pt.center, scale(pt.axis, profile.clearance)), pt.axis) as any);
   const floor = fitted.intersect(probe).volume();
   if (!spec.none && floor < probe.volume() * 0.9) warnings.push('pocket floor thinner than 0.8 mm; sink less or thicken the base');
 

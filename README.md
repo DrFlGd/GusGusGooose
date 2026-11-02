@@ -34,6 +34,11 @@ npm run detect -- goose/goose.stl
 # 2. fit an accessory at a point (accessory frame: base centred on the origin, +Z up)
 npm run fit -- --accessory hat.stl --point head --sink 2 --spin 0 --out hat.fitted.stl
 
+# 1b. or place a magnet hole yourself: click point (snapped to the surface), magnet size,
+#     open press-fit or embedded under a skin (prints the Z to pause at); adds the point to the profile
+node src/cli.ts hole --model goose/goose.stl --at 125.6,100.4,183 --name head --magnet-dia 6 --magnet-thick 3 --out goose/goose.holed.stl
+node src/cli.ts hole --model goose/goose.holed.stl --at 140,78,170 --name beak --magnet-dia 6 --magnet-thick 3 --embedded --skin 1 --out goose/goose.holed.stl
+
 # magnet size and pocket are adjustable per accessory (defaults mirror the goose void)
 npm run fit -- --accessory hat.stl --point head --magnet-dia 8 --magnet-thick 3 --pocket-radial 0.1 --pocket-axial 0.2
 npm run fit -- --accessory hat.stl --point head --no-pocket
@@ -51,6 +56,7 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/build-goose.ts` unions the 3MF parts into the one goose solid
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
+- `src/hole.ts` magnet-hole tool: snap to surface, cut open or embedded pocket
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)
 - `src/cli.ts` `detect` and `fit` commands
 - `test/` end-to-end test on a synthetic goose (sphere with four voids)

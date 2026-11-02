@@ -3,13 +3,18 @@
 //
 //   node src/cli.ts detect goose/goose.stl [--out goose/profile.json]
 //   node src/cli.ts fit --accessory hat.stl --point head [--sink 2] [--spin 0] [--out fitted.stl]
+//   node src/cli.ts hole --model goose/goose.stl --at x,y,z --name head --magnet-dia 6 --magnet-thick 3 [--embedded --skin 1] [--out goose/goose.holed.stl]
 //
 // `detect` finds the magnet voids in the goose and writes the fit profile.
 // `fit` uses that profile to carve and pocket an accessory.
+// `hole` cuts a magnet pocket at a picked spot (open or embedded) and adds
+// the point to the profile.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { readStl, writeStl } from './stl.ts';
 import { findVoids, suggestNames } from './voids.ts';
+import { addMagnetHole } from './hole.ts';
+import { fromManifold } from './fit.ts';
 import { DEFAULT_PROFILE, fitAccessory, toManifold, type FitProfile } from './fit.ts';
 
 const GOOSE = 'goose/goose.stl';
@@ -69,10 +74,43 @@ async function fit() {
   console.log(`written to ${out}`);
 }
 
+async function hole() {
+  const modelPath = arg('model', GOOSE)!;
+  const at = arg('at')?.split(',').map(Number);
+  const name = arg('name');
+  const dia = arg('magnet-dia'), thick = arg('magnet-thick');
+  if (!at || at.length !== 3 || !name || !dia || !thick) {
+    throw new Error('usage: hole --model goose/goose.stl --at x,y,z --name head --magnet-dia 6 --magnet-thick 3 [--embedded] [--skin 1] [--pocket-radial 0] [--pocket-axial 0.1] [--axis x,y,z] [--profile goose/profile.json] [--out model.holed.stl]');
+  }
+  const profilePath = arg('profile', PROFILE)!;
+  const mesh = readStl(modelPath);
+  const model = await toManifold(mesh);
+  const embedded = process.argv.includes('--embedded');
+  const result = await addMagnetHole(model, mesh, {
+    point: at as [number, number, number],
+    axis: arg('axis')?.split(',').map(Number) as [number, number, number] | undefined,
+    diameter: Number(dia),
+    thickness: Number(thick),
+    radialClearance: arg('pocket-radial') ? Number(arg('pocket-radial')) : undefined,
+    axialClearance: arg('pocket-axial') ? Number(arg('pocket-axial')) : undefined,
+    mode: embedded ? 'embedded' : 'open',
+    skin: arg('skin') ? Number(arg('skin')) : undefined,
+  });
+  const out = arg('out', modelPath.replace(/\.stl$/i, '') + '.holed.stl')!;
+  writeStl(out, fromManifold(result.model));
+  const existing: Partial<FitProfile> = existsSync(profilePath) ? JSON.parse(readFileSync(profilePath, 'utf8')) : {};
+  const profile: FitProfile = { ...DEFAULT_PROFILE, ...existing, points: { ...(existing.points ?? {}), [name]: result.point } };
+  writeFileSync(profilePath, JSON.stringify(profile, null, 2));
+  const f = (n: number) => n.toFixed(2);
+  console.log(`${result.point.mode} hole "${name}" at (${result.point.center.map(f).join(', ')}) axis (${result.point.axis.map(f).join(', ')}), ${f(result.point.diameter)} dia x ${f(result.point.depth)} deep`);
+  if (result.pauseZ !== undefined) console.log(`  pause the print at Z = ${f(result.pauseZ)} mm to insert the magnet`);
+  console.log(`model written to ${out}, point added to ${profilePath}`);
+}
+
 const cmd = process.argv[2];
-const run = cmd === 'detect' ? detect : cmd === 'fit' ? fit : null;
+const run = cmd === 'detect' ? detect : cmd === 'fit' ? fit : cmd === 'hole' ? hole : null;
 if (!run) {
-  console.error('commands: detect, fit');
+  console.error('commands: detect, fit, hole');
   process.exit(2);
 }
 run().catch((e) => { console.error(e.message ?? e); process.exit(1); });

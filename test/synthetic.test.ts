@@ -92,9 +92,9 @@ test('per-accessory pocket overrides change the pocket size', async () => {
   const extra = Math.PI * (16 * 4.1 - 9 * 3.1);
   const got = stock.volumeAfter - bigger.volumeAfter;
   assert.ok(Math.abs(got - extra) < extra * 0.1, `extra pocket volume ${got}, expected ${extra}`);
-  // the stock pocket is the magnet cylinder plus the plug of accessory that
-  // had filled the goose void (up to sink + clearance deep)
+  // the stock pocket is the magnet cylinder measured from the mating face
+  // (a little less on a sphere, where the face curves away at the rim)
   const pocketOnly = none.volumeAfter - stock.volumeAfter;
-  const magnet = Math.PI * 9 * 3.1, plug = Math.PI * 9 * (2 + DEFAULT_PROFILE.clearance);
-  assert.ok(pocketOnly > magnet && pocketOnly < magnet + plug + 5, `stock pocket volume ${pocketOnly}`);
+  const magnet = Math.PI * 9 * 3.1;
+  assert.ok(Math.abs(pocketOnly - magnet) < 6, `stock pocket volume ${pocketOnly}, expected about ${magnet}`);
 });
