@@ -8,15 +8,23 @@
     "node": ">=22.18"
   },
   "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "smoke": "vite build && node scripts/smoke.mjs",
     "detect": "node src/cli.ts detect",
     "fit": "node src/cli.ts fit",
-    "test": "node --test test/"
+    "hole": "node src/cli.ts hole",
+    "build-goose": "node src/build-goose.ts goose/goose.3mf goose/goose.stl --voids goose/goose-voids.3mf",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
     "manifold-3d": "3.1.1",
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "@types/three": "^0.170.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.11"

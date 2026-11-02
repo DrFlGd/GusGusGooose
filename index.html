@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gus Gus Goose fitter</title>
+  <link rel="stylesheet" href="/src/web/style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="panel">
+      <h1>Gus Gus Goose</h1>
+      <p id="status" class="muted">Loading goose…</p>
+
+      <nav class="tabs">
+        <button data-tab="accessory" class="active">Accessory</button>
+        <button data-tab="hole">Magnet hole</button>
+      </nav>
+
+      <section id="tab-accessory" class="tab">
+        <label class="file">
+          <input type="file" id="accessory-file" accept=".stl" />
+          <span>Load accessory STL</span>
+        </label>
+        <p class="muted small">Accessory frame: base centred on the origin, +Z up, the −Z side meets the goose.</p>
+        <div id="accessory-controls" class="hidden">
+          <label>Magnet point
+            <select id="point"></select>
+          </label>
+          <label>Sink into goose <output id="sink-out">2.0</output> mm
+            <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
+          </label>
+          <label>Spin <output id="spin-out">0</output>°
+            <input type="range" id="spin" min="-180" max="180" step="5" value="0" />
+          </label>
+          <label>Slide X <output id="dx-out">0.0</output> mm
+            <input type="range" id="dx" min="-30" max="30" step="0.5" value="0" />
+          </label>
+          <label>Slide Y <output id="dy-out">0.0</output> mm
+            <input type="range" id="dy" min="-30" max="30" step="0.5" value="0" />
+          </label>
+          <details>
+            <summary>Pocket (defaults mirror the goose magnet)</summary>
+            <label>Magnet diameter <input type="number" id="pocket-dia" step="0.1" placeholder="auto" /></label>
+            <label>Magnet thickness <input type="number" id="pocket-thick" step="0.1" placeholder="auto" /></label>
+            <label>Radial clearance <input type="number" id="pocket-radial" step="0.05" placeholder="0" /></label>
+            <label>Axial clearance <input type="number" id="pocket-axial" step="0.05" placeholder="0.1" /></label>
+            <label class="check"><input type="checkbox" id="pocket-none" /> No pocket</label>
+          </details>
+          <label>Surface clearance <output id="clearance-out">0.20</output> mm
+            <input type="range" id="clearance" min="0" max="0.6" step="0.05" value="0.2" />
+          </label>
+          <div class="row">
+            <button id="fit" class="primary">Fit</button>
+            <button id="export-fitted" disabled>Export STL</button>
+          </div>
+          <p id="fit-result" class="small"></p>
+        </div>
+      </section>
+
+      <section id="tab-hole" class="tab hidden">
+        <p class="small muted">Click the goose to pick a spot. The hole follows the surface normal there.</p>
+        <p id="pick" class="small">No spot picked.</p>
+        <label>Name <input type="text" id="hole-name" value="new_point" /></label>
+        <label>Magnet diameter <input type="number" id="hole-dia" step="0.1" value="6" /> mm</label>
+        <label>Magnet thickness <input type="number" id="hole-thick" step="0.1" value="3" /> mm</label>
+        <label>Mode
+          <select id="hole-mode">
+            <option value="open">Open (press fit)</option>
+            <option value="embedded">Embedded (pause print)</option>
+          </select>
+        </label>
+        <label id="skin-row" class="hidden">Skin over the magnet <input type="number" id="hole-skin" step="0.1" value="1" /> mm</label>
+        <div class="row">
+          <button id="cut-hole" class="primary" disabled>Cut hole</button>
+        </div>
+        <p id="hole-result" class="small"></p>
+        <div class="row">
+          <button id="export-goose">Export goose STL</button>
+          <button id="export-profile">Profile JSON</button>
+        </div>
+      </section>
+
+      <section class="points">
+        <h2>Magnet points</h2>
+        <ul id="points"></ul>
+      </section>
+    </aside>
+    <main id="view"></main>
+  </div>
+  <script type="module" src="/src/web/main.ts"></script>
+</body>
+</html>

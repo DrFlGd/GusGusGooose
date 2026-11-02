@@ -7,9 +7,23 @@ with a matching magnet pocket cut in.
 
 The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.md).
 
+## App
+
+`npm run dev` opens the browser app (Vite). It loads the goose and its
+magnet points, lets you drop an accessory STL on a point with sink, spin
+and slide controls, fits it with one click and exports the STL. The
+Magnet hole tab cuts a new hole where you click, open or embedded with the
+pause height reported, and exports the holed goose. Everything runs in
+the page; nothing is uploaded. `npm run smoke` builds it and drives it
+headlessly (fit a puck, cut a hole, screenshots in `smoke-out/`); it needs
+Playwright with Chromium available.
+
+The GitHub Pages workflow deploys the app from `main` once Pages is
+enabled for the repo (Settings → Pages → Source: GitHub Actions).
+
 ## Status
 
-Phase 1 (headless fit script) passes against a synthetic goose. The real
+Phase 1 (headless fit) and a first Phase 2 UI are in. The real
 goose is in `goose/goose.3mf` (Bambu Studio project, v1.2.3 blank, full
 colour assembly) and `goose/goose-voids.3mf` (the bare white body and nose
 with the magnet voids as Bambu negative parts). `goose/goose.stl` is built
@@ -64,6 +78,8 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
 - `src/hole.ts` magnet-hole tool: snap to surface, cut open or embedded pocket
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)
-- `src/cli.ts` `detect` and `fit` commands
+- `src/cli.ts` `detect`, `fit` and `hole` commands
+- `src/web/` the browser app (three.js viewer, panel, same pipeline in Manifold WASM)
+- `scripts/smoke.mjs` headless Playwright run of the built app
 - `test/` end-to-end test on a synthetic goose (sphere with four voids)
 - `goose/` the bundled goose model and its fit profile

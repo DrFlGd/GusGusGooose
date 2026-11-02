@@ -15,7 +15,7 @@ import { mapNegatives, primitivesToPoints, type VoidPrimitive } from './map-void
 
 export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = [], log = (s: string) => console.log(s)): Promise<{ goose: ManifoldT; solid: ManifoldT }> {
   const { Manifold } = await manifold();
-  const solids = [], holes = [];
+  const solids: ManifoldT[] = [], holes: ManifoldT[] = [];
   for (const p of parts) {
     const bb = bounds(p.mesh);
     try {
