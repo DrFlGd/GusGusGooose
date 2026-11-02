@@ -23,6 +23,27 @@
           <span>Load accessory STL</span>
         </label>
         <p class="muted small">Accessory frame: base centred on the origin, +Z up, the −Z side meets the goose.</p>
+        <details id="generator">
+          <summary>Or generate a base</summary>
+          <label>Shape
+            <select id="gen-shape">
+              <option value="puck">Puck (cylinder)</option>
+              <option value="dome">Dome (half sphere)</option>
+              <option value="plate">Plate (rounded box)</option>
+              <option value="ring">Ring (washer)</option>
+            </select>
+          </label>
+          <label>Width / diameter <input type="number" id="gen-w" step="0.5" value="20" /> mm</label>
+          <label id="gen-d-row" class="hidden">Depth <input type="number" id="gen-d" step="0.5" value="14" /> mm</label>
+          <label>Height <input type="number" id="gen-h" step="0.5" value="8" /> mm</label>
+          <label id="gen-i-row" class="hidden">Inner diameter <input type="number" id="gen-i" step="0.5" value="12" /> mm</label>
+          <div class="row"><button id="generate">Use this base</button></div>
+          <p class="muted small">A base is sized so the magnet pocket fits with 1.5 mm of wall; fit it, export it, and build the decorative part on top in your CAD, or load a decoration STL and it is unioned onto the base.</p>
+          <label class="file">
+            <input type="file" id="decoration-file" accept=".stl" />
+            <span>Add decoration STL on top of the base</span>
+          </label>
+        </details>
         <div id="accessory-controls" class="hidden">
           <label>Magnet point
             <select id="point"></select>

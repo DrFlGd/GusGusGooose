@@ -152,6 +152,82 @@ $<HTMLInputElement>('accessory-file').onchange = async (e) => {
   updatePreview();
 };
 
+// ---------- base generators ----------
+$<HTMLSelectElement>('gen-shape').onchange = (e) => {
+  const shape = (e.target as HTMLSelectElement).value;
+  $('gen-d-row').classList.toggle('hidden', shape !== 'plate');
+  $('gen-i-row').classList.toggle('hidden', shape !== 'ring');
+  if (shape === 'dome') $<HTMLInputElement>('gen-h').value = (Number($<HTMLInputElement>('gen-w').value) / 2).toString();
+};
+
+let baseManifold: ManifoldT | null = null;
+let decorationManifold: ManifoldT | null = null;
+
+async function generateBase(): Promise<ManifoldT> {
+  const { Manifold } = await manifold();
+  const shape = $<HTMLSelectElement>('gen-shape').value;
+  const w = Number($<HTMLInputElement>('gen-w').value);
+  const h = Number($<HTMLInputElement>('gen-h').value);
+  const pt = profile.points[activePoint];
+  const minW = pt ? (pt.shape === 'box' && pt.size ? Math.hypot(...pt.size) : pt.diameter) + 3 : 0;
+  if (w < minW) status(`Note: ${w} mm is narrower than the ${minW.toFixed(1)} mm this magnet needs with 1.5 mm walls.`);
+  switch (shape) {
+    case 'dome': {
+      const r = w / 2;
+      return Manifold.sphere(r, 96).intersect(Manifold.cube([w, w, r], false).translate(-r, -r, 0));
+    }
+    case 'plate': {
+      const d = Number($<HTMLInputElement>('gen-d').value);
+      const rr = Math.min(3, w / 4, d / 4);
+      // rounded box: hull of four corner cylinders
+      const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) =>
+        Manifold.cylinder(h, rr, rr, 32, false).translate(sx * (w / 2 - rr), sy * (d / 2 - rr), 0));
+      return Manifold.hull(corners);
+    }
+    case 'ring': {
+      const inner = Number($<HTMLInputElement>('gen-i').value) / 2;
+      return Manifold.cylinder(h, w / 2, w / 2, 96, false).subtract(Manifold.cylinder(h + 2, inner, inner, 96, false).translate(0, 0, -1));
+    }
+    default:
+      return Manifold.cylinder(h, w / 2, w / 2, 96, false);
+  }
+}
+
+async function useBase() {
+  baseManifold = await generateBase();
+  let m = baseManifold;
+  if (decorationManifold) m = m.add(decorationManifold);
+  accessoryManifold = m;
+  accessoryMesh = fromManifold(m);
+  clearFitted();
+  if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); }
+  accessoryObject = new THREE.Mesh(toGeometry(accessoryMesh), accessoryMaterial);
+  scene.add(accessoryObject);
+  $('accessory-controls').classList.remove('hidden');
+  status(`Base generated${decorationManifold ? ' with decoration' : ''}. Place it, then Fit.`);
+  updatePreview();
+}
+$('generate').onclick = () => { useBase().catch((e) => status(`Generate failed: ${e.message}`)); };
+for (const id of ['gen-w', 'gen-d', 'gen-h', 'gen-i']) $<HTMLInputElement>(id).onchange = () => { if (baseManifold) useBase(); };
+
+$<HTMLInputElement>('decoration-file').onchange = async (e) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  try {
+    const { Manifold } = await manifold();
+    const mesh = parseStl(await file.arrayBuffer());
+    const deco = await toManifold(mesh);
+    // the decoration sits on top of the base: its lowest point lands at the base's top
+    const h = Number($<HTMLInputElement>('gen-h').value);
+    const bb = deco.boundingBox();
+    decorationManifold = deco.translate(-(bb.min[0] + bb.max[0]) / 2, -(bb.min[1] + bb.max[1]) / 2, h - bb.min[2] - 0.5);
+    void Manifold;
+    await useBase();
+  } catch (err) {
+    status(`${file.name}: ${(err as Error).message}`);
+  }
+};
+
 function placement(): Placement {
   const num = (id: string) => { const v = $<HTMLInputElement>(id).value; return v === '' ? undefined : Number(v); };
   return {

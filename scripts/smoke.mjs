@@ -37,6 +37,18 @@ await page.waitForFunction(() => document.getElementById('fit-result').textConte
 console.log('3.', await page.locator('#fit-result').textContent());
 await page.screenshot({ path: join(out, '3-fitted.png') });
 
+// generated base: a dome on the left wing
+await page.click('#generator summary');
+await page.selectOption('#gen-shape', 'dome');
+await page.fill('#gen-w', '22');
+await page.click('#generate');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Base generated'), null, { timeout: 30000 });
+await page.selectOption('#point', 'left_wing');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('3b.', await page.locator('#fit-result').textContent());
+await page.screenshot({ path: join(out, '3b-dome-wing.png') });
+
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
 const box = await page.locator('#view canvas').boundingBox();
