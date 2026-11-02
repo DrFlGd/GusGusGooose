@@ -1,0 +1,16 @@
+{
+  "name": "gusgusgoose",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fit magnet-mounted accessories to the Gus Gus desk goose",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "detect": "node src/cli.ts detect",
+    "fit": "node src/cli.ts fit",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "manifold-3d": "3.1.1"
+  }
+}
