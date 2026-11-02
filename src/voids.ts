@@ -87,10 +87,12 @@ export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
   }
 
   const voids: MagnetVoid[] = [];
+  const debug = !!process.env.GOOSE_DEBUG;
+  const reject = (faces: number[], why: string) => { if (debug && faces.length >= MIN_WALL_FACES) console.log(`  patch ${faces.length} faces: ${why}`); };
   for (const faces of patches) {
     if (faces.length < MIN_WALL_FACES) continue;
     const axis = cylinderAxis(faces, normals);
-    if (!axis) continue;
+    if (!axis) { reject(faces, 'no axis'); continue; }
     // all normals perpendicular to the axis, and wrapping the full circle
     let maxDot = 0;
     const meanN: V3 = [0, 0, 0];
@@ -99,8 +101,8 @@ export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
       maxDot = Math.max(maxDot, Math.abs(dot(n, axis)));
       meanN[0] += n[0]; meanN[1] += n[1]; meanN[2] += n[2];
     }
-    if (maxDot > 0.2) continue;
-    if (norm(meanN) / faces.length > 0.3) continue;
+    if (maxDot > 0.2) { if (faces.length < 400) reject(faces, `maxDot ${maxDot.toFixed(2)}`); continue; }
+    if (norm(meanN) / faces.length > 0.3) { reject(faces, `meanN ${(norm(meanN) / faces.length).toFixed(2)}`); continue; }
 
     // a point on the axis = mean of face centroids
     const c0: V3 = [0, 0, 0];
@@ -120,14 +122,14 @@ export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
     }
     const rMean = rSum / verts.size;
     const rStd = Math.sqrt(Math.max(0, rSq / verts.size - rMean * rMean));
-    if (rMean > MAX_RADIUS || rStd / rMean > 0.08) continue;
+    if (rMean > MAX_RADIUS || rStd / rMean > 0.08) { reject(faces, `rMean ${rMean.toFixed(2)} rStd/r ${(rStd / rMean).toFixed(2)}`); continue; }
     let inward = 0;
     for (const f of faces) {
       const d = sub([centroids[f * 3], centroids[f * 3 + 1], centroids[f * 3 + 2]], c0);
       const radial = sub(d, scale(axis, dot(d, axis)));
       if (dot(radial, [normals[f * 3], normals[f * 3 + 1], normals[f * 3 + 2]]) < 0) inward++;
     }
-    if (inward < faces.length * 0.9) continue;
+    if (inward < faces.length * 0.9) { reject(faces, `inward ${inward}/${faces.length} r ${rMean.toFixed(2)}`); continue; }
 
     // which end is the floor? a neighbouring face whose normal runs along the
     // axis and whose centroid lies inside the cylinder (the rim around the
@@ -146,7 +148,7 @@ export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
       }
       if (!Number.isNaN(floorT)) break;
     }
-    if (Number.isNaN(floorT)) continue; // open tube, not a pocket
+    if (Number.isNaN(floorT)) { reject(faces, `no floor, r ${rMean.toFixed(2)} depth ${(tMax - tMin).toFixed(2)} at ${c0.map((v) => v.toFixed(1))}`); continue; } // open tube, not a pocket
     // orient axis so it points from the floor toward the mouth
     const out = Math.abs(floorT - tMin) < Math.abs(floorT - tMax) ? axis : scale(axis, -1);
     const tFloor = out === axis ? tMin : -tMax;

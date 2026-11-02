@@ -9,8 +9,13 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 
 ## Status
 
-Phase 1 (headless fit script) scaffolded and passing against a synthetic
-goose. Waiting on the real goose STL to go in `goose/goose.stl`.
+Phase 1 (headless fit script) passes against a synthetic goose. The real
+goose is in `goose/goose.3mf` (Bambu Studio project, v1.2.3 blank) and
+`goose/goose.stl` is built from it (body, beak, feet, base disc, minus the
+two leg pin holes; 57,756 triangles, 100 x 131 x 183 mm). This blank has no
+magnet voids yet, only the 3.5 mm eye pin holes, so the four magnet points
+will be placed with the magnet-hole tool rather than detected. The eyes are
+printed separately and are not in the model.
 
 ## Use
 
@@ -19,7 +24,11 @@ Requires Node 22.18 or newer (it runs the TypeScript directly).
 ```sh
 npm install
 
-# 1. find the magnet voids in the goose, write goose/profile.json
+# 0. rebuild goose/goose.stl from the project 3MF (only when the goose changes)
+node src/build-goose.ts goose/goose.3mf goose/goose.stl
+
+# 1. find cylindrical magnet voids in a model, write goose/profile.json
+#    (GOOSE_DEBUG=1 prints why each candidate patch was rejected)
 npm run detect -- goose/goose.stl
 
 # 2. fit an accessory at a point (accessory frame: base centred on the origin, +Z up)
@@ -38,6 +47,8 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 
 ## Layout
 
+- `src/threemf.ts` reads a 3MF project (parts, transforms, negative parts)
+- `src/build-goose.ts` unions the 3MF parts into the one goose solid
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)
