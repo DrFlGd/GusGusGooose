@@ -25,6 +25,10 @@ npm run detect -- goose/goose.stl
 # 2. fit an accessory at a point (accessory frame: base centred on the origin, +Z up)
 npm run fit -- --accessory hat.stl --point head --sink 2 --spin 0 --out hat.fitted.stl
 
+# magnet size and pocket are adjustable per accessory (defaults mirror the goose void)
+npm run fit -- --accessory hat.stl --point head --magnet-dia 8 --magnet-thick 3 --pocket-radial 0.1 --pocket-axial 0.2
+npm run fit -- --accessory hat.stl --point head --no-pocket
+
 npm test
 ```
 

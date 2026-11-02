@@ -35,6 +35,21 @@ export interface Placement {
   spin: number;
   /** slide of the accessory base in its own XY, mm */
   offset: [number, number];
+  /** per-accessory pocket overrides; anything unset mirrors the goose void and the profile */
+  pocket?: PocketSpec;
+}
+
+export interface PocketSpec {
+  /** magnet diameter, mm (default: the goose void's diameter) */
+  diameter?: number;
+  /** magnet thickness, mm (default: profile.magnetThickness, else the void's depth) */
+  thickness?: number;
+  /** extra radius, mm (default: profile.pocketRadialClearance) */
+  radialClearance?: number;
+  /** extra depth, mm (default: profile.pocketAxialClearance) */
+  axialClearance?: number;
+  /** skip the pocket entirely, for accessories that hold their magnet some other way */
+  none?: boolean;
 }
 
 export interface FitResult {
@@ -122,13 +137,16 @@ export async function fitAccessory(
   let fitted = placed.subtract(grown);
 
   // 4. magnet pocket, mirroring the goose void, opening on the mating face
-  const depth = (profile.magnetThickness ?? pt.depth) + profile.pocketAxialClearance;
-  const radius = pt.diameter / 2 + profile.pocketRadialClearance;
+  const spec = placement.pocket ?? {};
+  const depth = (spec.thickness ?? profile.magnetThickness ?? pt.depth) + (spec.axialClearance ?? profile.pocketAxialClearance);
+  const radius = (spec.diameter ?? pt.diameter) / 2 + (spec.radialClearance ?? profile.pocketRadialClearance);
   const reach = placement.sink + profile.clearance + 1; // start well inside the goose side
-  const pocket = Manifold.cylinder(depth + reach, radius, radius, 64, false)
-    .translate(0, 0, -reach)
-    .transform(frameAt(pt.center, pt.axis) as any);
-  fitted = fitted.subtract(pocket);
+  if (!spec.none) {
+    const pocket = Manifold.cylinder(depth + reach, radius, radius, 64, false)
+      .translate(0, 0, -reach)
+      .transform(frameAt(pt.center, pt.axis) as any);
+    fitted = fitted.subtract(pocket);
+  }
 
   // 5. checks
   const parts = fitted.decompose();
@@ -142,7 +160,7 @@ export async function fitAccessory(
     .translate(0, 0, depth)
     .transform(frameAt(pt.center, pt.axis) as any);
   const floor = fitted.intersect(probe).volume();
-  if (floor < probe.volume() * 0.9) warnings.push('pocket floor thinner than 0.8 mm; sink less or thicken the base');
+  if (!spec.none && floor < probe.volume() * 0.9) warnings.push('pocket floor thinner than 0.8 mm; sink less or thicken the base');
 
   return { mesh: fromManifold(fitted), volumeBefore, volumeAfter, bodies, warnings };
 }

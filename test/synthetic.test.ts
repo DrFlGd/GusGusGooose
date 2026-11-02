@@ -76,3 +76,25 @@ test('fits a hat on the head: carved base, pocket, one body', async () => {
   const pushed = fitted.translate(0, 0, -DEFAULT_PROFILE.clearance * 1.5);
   assert.ok(pushed.intersect(goose).volume() > 1, 'carved face is not close to the goose');
 });
+
+test('per-accessory pocket overrides change the pocket size', async () => {
+  const { Manifold } = await manifold();
+  const goose = await syntheticGoose();
+  const voids = findVoids(fromManifold(goose));
+  const names = suggestNames(voids);
+  const profile: FitProfile = { ...DEFAULT_PROFILE, points: { head: voids[names.head] } };
+  const hat = await toManifold(fromManifold(Manifold.cylinder(8, 10, 10, 64, false)));
+  const base = { point: 'head', sink: 2, spin: 0, offset: [0, 0] as [number, number] };
+  const stock = await fitAccessory(goose, hat, profile, base);
+  const bigger = await fitAccessory(goose, hat, profile, { ...base, pocket: { diameter: 8, thickness: 4 } });
+  const none = await fitAccessory(goose, hat, profile, { ...base, pocket: { none: true } });
+  // bigger magnet removes about the difference between the two cylinders
+  const extra = Math.PI * (16 * 4.1 - 9 * 3.1);
+  const got = stock.volumeAfter - bigger.volumeAfter;
+  assert.ok(Math.abs(got - extra) < extra * 0.1, `extra pocket volume ${got}, expected ${extra}`);
+  // the stock pocket is the magnet cylinder plus the plug of accessory that
+  // had filled the goose void (up to sink + clearance deep)
+  const pocketOnly = none.volumeAfter - stock.volumeAfter;
+  const magnet = Math.PI * 9 * 3.1, plug = Math.PI * 9 * (2 + DEFAULT_PROFILE.clearance);
+  assert.ok(pocketOnly > magnet && pocketOnly < magnet + plug + 5, `stock pocket volume ${pocketOnly}`);
+});
