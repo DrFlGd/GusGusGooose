@@ -13,12 +13,19 @@ export interface Part {
   name: string;
   /** 'negative' parts are holes to subtract from the normal ones */
   kind: 'normal' | 'negative' | 'modifier';
+  /** world-space mesh */
   mesh: IndexedMesh;
+  /** the part's own mesh, before any transform */
+  local: IndexedMesh;
+  /** local → world */
+  transform: Xf;
+  /** id of the top-level build object this part belongs to */
+  group: string;
 }
 
 /** 3MF transform: 12 numbers, row-vector convention (p' = p·M + t). */
-type Xf = number[];
-const IDENTITY: Xf = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
+export type Xf = number[];
+export const IDENTITY: Xf = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
 
 interface RawObject {
   id: string;
@@ -51,6 +58,7 @@ export function read3mf(path: string): Part[] {
   const names = partNames(dir);
 
   const parts: Part[] = [];
+  let group = '';
   const visit = (objectId: string, path: string, xf: Xf) => {
     const o = objects.get(`${path}#${objectId}`);
     if (!o) throw new Error(`3MF references missing object ${objectId} in ${path}`);
@@ -59,11 +67,11 @@ export function read3mf(path: string): Part[] {
       const kind: Part['kind'] = meta?.subtype === 'negative_part' ? 'negative'
         : meta?.subtype === 'modifier_part' ? 'modifier'
         : o.type === 'other' ? 'negative' : 'normal';
-      parts.push({ name: meta?.name ?? `object ${objectId}`, kind, mesh: transformMesh(o.mesh, xf) });
+      parts.push({ name: meta?.name ?? `object ${objectId}`, kind, mesh: transformMesh(o.mesh, xf), local: o.mesh, transform: xf, group });
     }
     for (const c of o.components) visit(c.objectId, c.path ?? path, compose(c.transform, xf));
   };
-  for (const item of buildItems) visit(item.objectId, item.path, item.transform);
+  for (const item of buildItems) { group = item.objectId; visit(item.objectId, item.path, item.transform); }
   if (!parts.length) throw new Error(`no printable parts found in ${path} (root model ${rootModel || 'not found'})`);
   return parts;
 }
@@ -116,7 +124,7 @@ function parseXf(s?: string): Xf {
 }
 
 /** first `a` then `b`, both row-vector 3x4 */
-function compose(a: Xf, b: Xf): Xf {
+export function compose(a: Xf, b: Xf): Xf {
   const r: Xf = new Array(12).fill(0);
   for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
     r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
@@ -125,7 +133,27 @@ function compose(a: Xf, b: Xf): Xf {
   return r;
 }
 
-function transformMesh(m: IndexedMesh, xf: Xf): IndexedMesh {
+export function invert(x: Xf): Xf {
+  const [a, b, c, d, e, f, g, h, i] = x;
+  const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  const r = [
+    (e * i - f * h) / det, (c * h - b * i) / det, (b * f - c * e) / det,
+    (f * g - d * i) / det, (a * i - c * g) / det, (c * d - a * f) / det,
+    (d * h - e * g) / det, (b * g - a * h) / det, (a * e - b * d) / det,
+  ];
+  const t = x.slice(9);
+  const tx = -(t[0] * r[0] + t[1] * r[3] + t[2] * r[6]);
+  const ty = -(t[0] * r[1] + t[1] * r[4] + t[2] * r[7]);
+  const tz = -(t[0] * r[2] + t[1] * r[5] + t[2] * r[8]);
+  return [...r, tx, ty, tz];
+}
+
+export function applyXf(xf: Xf, p: [number, number, number]): [number, number, number] {
+  const [x, y, z] = p;
+  return [x * xf[0] + y * xf[3] + z * xf[6] + xf[9], x * xf[1] + y * xf[4] + z * xf[7] + xf[10], x * xf[2] + y * xf[5] + z * xf[8] + xf[11]];
+}
+
+export function transformMesh(m: IndexedMesh, xf: Xf): IndexedMesh {
   const p = m.positions;
   const out = new Float32Array(p.length);
   for (let i = 0; i < p.length; i += 3) {

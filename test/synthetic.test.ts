@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readStl, writeStl } from '../src/stl.ts';
+import { readStl, writeStl } from '../src/stl-node.ts';
 import { findVoids, suggestNames } from '../src/voids.ts';
 import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, manifold, toManifold, type FitProfile } from '../src/fit.ts';
 

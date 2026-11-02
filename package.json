@@ -4,13 +4,21 @@
   "private": true,
   "description": "Fit magnet-mounted accessories to the Gus Gus desk goose",
   "type": "module",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "detect": "node src/cli.ts detect",
     "fit": "node src/cli.ts fit",
     "test": "node --test test/"
   },
   "dependencies": {
-    "manifold-3d": "3.1.1"
+    "manifold-3d": "3.1.1",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
   }
 }

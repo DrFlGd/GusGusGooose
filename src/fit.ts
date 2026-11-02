@@ -18,6 +18,8 @@ export interface FitProfile {
   /** magnet thickness; the pocket is this deep plus axial clearance. Defaults to the void depth. */
   magnetThickness?: number;
   points: Record<string, MagnetVoid & { polarityOut?: 'N' | 'S' }>;
+  /** other openings in the goose (magnet insertion slots) the fit treats as solid */
+  slots?: MagnetVoid[];
 }
 
 export const DEFAULT_PROFILE: Omit<FitProfile, 'points'> = {
@@ -130,12 +132,10 @@ export async function fitAccessory(
   const pad = profile.clearance * 2 + 1;
   const size: V3 = [bb.max[0] - bb.min[0] + 2 * pad, bb.max[1] - bb.min[1] + 2 * pad, bb.max[2] - bb.min[2] + 2 * pad];
   const cropBox = Manifold.cube(size, false).translate(bb.min[0] - pad, bb.min[1] - pad, bb.min[2] - pad);
-  // the goose's own magnet voids are filled first, so the accessory is carved
-  // against the surface rather than growing plugs down into the holes
-  const fillers = Object.values(profile.points).map((p) =>
-    Manifold.cylinder(p.depth + 0.05, p.diameter / 2 + 0.05, p.diameter / 2 + 0.05, 64, false)
-      .translate(0, 0, -p.depth - 0.05)
-      .transform(frameAt(p.center, p.axis) as any));
+  // the goose's own magnet voids and slots are filled first, so the accessory
+  // is carved against the surface rather than growing plugs down into them
+  const fillers = [...Object.values(profile.points), ...(profile.slots ?? [])]
+    .map((p) => pocketSolid(Manifold, p, p.diameter / 2 + 0.05, p.size?.map((s) => s + 0.1) as [number, number] | undefined, 0, p.depth + 0.05, 0));
   const nearby = Manifold.union([goose, ...fillers]).intersect(cropBox);
   const grown = offsetApprox(Manifold, nearby, profile.clearance);
 
@@ -150,10 +150,11 @@ export async function fitAccessory(
   // clearance above the goose void mouth; it also reaches back through any
   // material below that face so the opening is always clear
   const reach = placement.sink + profile.clearance + 1;
+  const boxSize = spec.diameter === undefined && pt.shape === 'box' && pt.size
+    ? pt.size.map((s) => s + 2 * (spec.radialClearance ?? profile.pocketRadialClearance)) as [number, number]
+    : undefined;
   if (!spec.none) {
-    const pocket = Manifold.cylinder(depth + reach, radius, radius, 64, false)
-      .translate(0, 0, -reach)
-      .transform(frameAt(add(pt.center, scale(pt.axis, profile.clearance)), pt.axis) as any);
+    const pocket = pocketSolid(Manifold, pt, radius, boxSize, depth, reach, profile.clearance);
     fitted = fitted.subtract(pocket);
   }
 
@@ -177,6 +178,38 @@ export async function fitAccessory(
 }
 
 /**
+ * A pocket-shaped solid on a magnet point: a cylinder of `radius`, or a box of
+ * `boxSize` when given (aligned to the point's side axis). It starts `lift`
+ * above the point along the axis, reaches `reach` back below it and `depth`
+ * forward from there, so it both clears the opening and cuts the pocket.
+ */
+function pocketSolid(
+  Manifold: ManifoldToplevel['Manifold'],
+  pt: MagnetVoid,
+  radius: number,
+  boxSize: [number, number] | undefined,
+  depth: number,
+  reach: number,
+  lift: number,
+): ManifoldT {
+  const origin = add(pt.center, scale(pt.axis, lift));
+  const body = boxSize
+    ? Manifold.cube([boxSize[0], boxSize[1], depth + reach], true).translate(0, 0, (depth + reach) / 2 - reach)
+    : Manifold.cylinder(depth + reach, radius, radius, 64, false).translate(0, 0, -reach);
+  const frame = pt.sideAxis ? frameFromAxes(origin, pt.sideAxis, pt.axis) : frameAt(origin, pt.axis);
+  return body.transform(frame as any);
+}
+
+/** Column-major 4x4 with local +X along `x` (made perpendicular to `z`) and +Z along `z`. */
+export function frameFromAxes(origin: V3, x: V3, z: V3): number[] {
+  const a = normalize(z);
+  const xp = sub(x, scale(a, dot(x, a)));
+  const u = normalize(norm(xp) < 1e-6 ? cross([0, 0, 1], a) : xp);
+  const v = cross(a, u);
+  return [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, a[0], a[1], a[2], 0, origin[0], origin[1], origin[2], 1];
+}
+
+/**
  * Approximate outward offset: union of the body shifted along 14 directions.
  * Good to within ~15% of `d` on smooth surfaces; to be replaced by an SDF
  * level set once the BVH is in (see docs/PLAN.md, risk "Clearance offset").
@@ -191,6 +224,9 @@ function offsetApprox(Manifold: ManifoldToplevel['Manifold'], body: ManifoldT, d
 }
 
 const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const norm = (a: V3) => Math.hypot(a[0], a[1], a[2]);
 const scale = (a: V3, s: number): V3 => [a[0] * s, a[1] * s, a[2] * s];
 const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const normalize = (a: V3): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };

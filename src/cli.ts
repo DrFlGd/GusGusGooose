@@ -11,7 +11,7 @@
 // the point to the profile.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { readStl, writeStl } from './stl.ts';
+import { readStl, writeStl } from './stl-node.ts';
 import { findVoids, suggestNames } from './voids.ts';
 import { addMagnetHole } from './hole.ts';
 import { fromManifold } from './fit.ts';

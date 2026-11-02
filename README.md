@@ -10,11 +10,16 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 ## Status
 
 Phase 1 (headless fit script) passes against a synthetic goose. The real
-goose is in `goose/goose.3mf` (Bambu Studio project, v1.2.3 blank) and
-`goose/goose.stl` is built from it (body, beak, feet, base disc, minus the
-two leg pin holes; 57,756 triangles, 100 x 131 x 183 mm). This blank has no
-magnet voids yet, only the 3.5 mm eye pin holes, so the four magnet points
-will be placed with the magnet-hole tool rather than detected. The eyes are
+goose is in `goose/goose.3mf` (Bambu Studio project, v1.2.3 blank, full
+colour assembly) and `goose/goose-voids.3mf` (the bare white body and nose
+with the magnet voids as Bambu negative parts). `goose/goose.stl` is built
+from both: body, beak, feet, base disc, minus the leg pin holes and the
+magnet voids mapped across from the second file (63,586 triangles,
+100 x 131 x 183 mm). `goose/profile.json` holds the four magnet points read
+straight from those negative parts: head 10.2 dia x 4.2 disc, wings
+10.2 x 10.2 x 4.2 blocks, beak 8 dia x 4.2 disc with its insertion slot.
+All four are embedded (inserted at print pauses), so accessories align to
+the centre of each void's outer face projected to the surface. The eyes are
 printed separately and are not in the model.
 
 ## Use
@@ -24,8 +29,8 @@ Requires Node 22.18 or newer (it runs the TypeScript directly).
 ```sh
 npm install
 
-# 0. rebuild goose/goose.stl from the project 3MF (only when the goose changes)
-node src/build-goose.ts goose/goose.3mf goose/goose.stl
+# 0. rebuild goose/goose.stl and goose/profile.json from the project 3MFs (only when the goose changes)
+node src/build-goose.ts goose/goose.3mf goose/goose.stl --voids goose/goose-voids.3mf
 
 # 1. find cylindrical magnet voids in a model, write goose/profile.json
 #    (GOOSE_DEBUG=1 prints why each candidate patch was rejected)
@@ -53,7 +58,8 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 ## Layout
 
 - `src/threemf.ts` reads a 3MF project (parts, transforms, negative parts)
-- `src/build-goose.ts` unions the 3MF parts into the one goose solid
+- `src/build-goose.ts` unions the 3MF parts into the one goose solid, cutting the mapped voids
+- `src/map-voids.ts` carries negative parts from one 3MF onto another and turns them into magnet points
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
 - `src/hole.ts` magnet-hole tool: snap to surface, cut open or embedded pocket

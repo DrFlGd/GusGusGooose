@@ -1,7 +1,7 @@
-// Minimal STL reader/writer. Reads binary or ASCII, returns a welded
-// indexed triangle mesh (shared vertices), which is what Manifold needs.
-
-import { readFileSync, writeFileSync } from 'node:fs';
+// Minimal STL parser/serializer, pure (no Node APIs) so the browser app can
+// share it. Reads binary or ASCII, returns a welded indexed triangle mesh
+// (shared vertices), which is what Manifold needs. File helpers live in
+// stl-node.ts.
 
 export interface IndexedMesh {
   /** xyz per vertex, flat */
@@ -12,17 +12,19 @@ export interface IndexedMesh {
 
 const WELD_DECIMALS = 4; // 0.1 µm; welds identical vertices, keeps real gaps
 
-export function readStl(path: string): IndexedMesh {
-  const buf = readFileSync(path);
-  const soup = looksAscii(buf) ? parseAscii(buf.toString('latin1')) : parseBinary(buf);
+export function parseStl(data: ArrayBuffer | Uint8Array): IndexedMesh {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const soup = looksAscii(bytes) ? parseAscii(latin1(bytes)) : parseBinary(bytes);
   return weld(soup);
 }
 
-export function writeStl(path: string, mesh: IndexedMesh): void {
+export function serializeStl(mesh: IndexedMesh): Uint8Array {
   const triCount = mesh.triangles.length / 3;
-  const out = Buffer.alloc(84 + triCount * 50);
-  out.write('GusGusGoose fit export', 0, 'latin1');
-  out.writeUInt32LE(triCount, 80);
+  const out = new Uint8Array(84 + triCount * 50);
+  const view = new DataView(out.buffer);
+  const header = 'GusGusGoose fit export';
+  for (let i = 0; i < header.length; i++) out[i] = header.charCodeAt(i);
+  view.setUint32(80, triCount, true);
   let o = 84;
   const p = mesh.positions;
   const t = mesh.triangles;
@@ -33,33 +35,40 @@ export function writeStl(path: string, mesh: IndexedMesh): void {
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const len = Math.hypot(nx, ny, nz) || 1;
     nx /= len; ny /= len; nz /= len;
-    out.writeFloatLE(nx, o); out.writeFloatLE(ny, o + 4); out.writeFloatLE(nz, o + 8);
+    view.setFloat32(o, nx, true); view.setFloat32(o + 4, ny, true); view.setFloat32(o + 8, nz, true);
     o += 12;
     for (const idx of [a, b, c]) {
-      out.writeFloatLE(p[idx], o); out.writeFloatLE(p[idx + 1], o + 4); out.writeFloatLE(p[idx + 2], o + 8);
+      view.setFloat32(o, p[idx], true); view.setFloat32(o + 4, p[idx + 1], true); view.setFloat32(o + 8, p[idx + 2], true);
       o += 12;
     }
-    out.writeUInt16LE(0, o);
+    view.setUint16(o, 0, true);
     o += 2;
   }
-  writeFileSync(path, out);
+  return out;
 }
 
-function looksAscii(buf: Buffer): boolean {
-  if (buf.length < 84) return true;
-  if (buf.subarray(0, 5).toString('latin1') !== 'solid') return false;
+function latin1(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 8192) s += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return s;
+}
+
+function looksAscii(bytes: Uint8Array): boolean {
+  if (bytes.length < 84) return true;
+  if (latin1(bytes.subarray(0, 5)) !== 'solid') return false;
   // A binary file can start with "solid" too; trust the triangle count instead.
-  const n = buf.readUInt32LE(80);
-  return 84 + n * 50 !== buf.length;
+  const n = new DataView(bytes.buffer, bytes.byteOffset).getUint32(80, true);
+  return 84 + n * 50 !== bytes.length;
 }
 
-function parseBinary(buf: Buffer): Float32Array {
-  const n = buf.readUInt32LE(80);
+function parseBinary(bytes: Uint8Array): Float32Array {
+  const view = new DataView(bytes.buffer, bytes.byteOffset);
+  const n = view.getUint32(80, true);
   const soup = new Float32Array(n * 9);
   let o = 84 + 12;
   for (let i = 0; i < n; i++) {
     for (let k = 0; k < 9; k++) {
-      soup[i * 9 + k] = buf.readFloatLE(o);
+      soup[i * 9 + k] = view.getFloat32(o, true);
       o += 4;
     }
     o += 2 + 12; // attribute bytes + next normal

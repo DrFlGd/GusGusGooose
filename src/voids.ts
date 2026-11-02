@@ -13,8 +13,17 @@ export interface MagnetVoid {
   center: [number, number, number];
   /** unit vector pointing out of the void, away from the goose */
   axis: [number, number, number];
+  /** cylinder diameter, or for a box the larger of its two face sides */
   diameter: number;
   depth: number;
+  /** box voids: face sides across the axis and the direction of the first side */
+  shape?: 'cylinder' | 'box';
+  size?: [number, number];
+  sideAxis?: [number, number, number];
+  /** embedded voids are sealed under a skin; `center` is then the surface point over the void face */
+  mode?: 'open' | 'embedded';
+  faceCenter?: [number, number, number];
+  skin?: number;
   /** centre of the void floor */
   floor: [number, number, number];
   /** triangles in the cylindrical wall, for debugging */
