@@ -5,12 +5,15 @@
 import * as THREE from 'three';
 import type { IndexedMesh } from '../stl.ts';
 import type { Material } from '../threemf-write.ts';
+import { faceAdjacency, faceNormals, floodRegion } from '../paint-fill.ts';
 
 export class PaintState {
   readonly faceMaterial: Uint8Array;
   readonly centroids: Float32Array;
   readonly geometry: THREE.BufferGeometry;
   private history: Uint8Array[] = [];
+  private adjacency: Int32Array | null = null;
+  private normals: Float32Array | null = null;
 
   constructor(readonly mesh: IndexedMesh, public materials: Material[]) {
     const n = mesh.triangles.length / 3;
@@ -61,6 +64,39 @@ export class PaintState {
     if (changed) col.needsUpdate = true;
     return changed;
   }
+
+  /** Colour the given faces. Returns how many changed. */
+  paintFaces(faces: ArrayLike<number>, material: number): number {
+    const col = this.geometry.getAttribute('color') as THREE.BufferAttribute;
+    const c = new THREE.Color(this.materials[material]?.color ?? '#ffffff');
+    let changed = 0;
+    for (let i = 0; i < faces.length; i++) {
+      const f = faces[i];
+      if (this.faceMaterial[f] === material) continue;
+      this.faceMaterial[f] = material;
+      this.setFaceColor(col, f, c);
+      changed++;
+    }
+    if (changed) col.needsUpdate = true;
+    return changed;
+  }
+
+  /** Bucket fill from `face`: its colour's connected region, stopping at creases sharper than `maxAngleDeg`. */
+  bucket(face: number, material: number, maxAngleDeg: number): number {
+    this.adjacency ??= faceAdjacency(this.mesh);
+    this.normals ??= faceNormals(this.mesh);
+    return this.paintFaces(floodRegion(this.adjacency, this.normals, this.faceMaterial, face, maxAngleDeg), material);
+  }
+
+  /** Grows a face set by one ring of edge neighbours that pass `keep` (for faces too small to own a pixel). */
+  grow(faces: Uint32Array, keep: (f: number) => boolean): Uint32Array {
+    this.adjacency ??= faceAdjacency(this.mesh);
+    const set = new Set(faces);
+    for (const f of faces) for (let k = 0; k < 3; k++) { const g = this.adjacency[f * 3 + k]; if (g >= 0 && !set.has(g) && keep(g)) set.add(g); }
+    return Uint32Array.from(set);
+  }
+
+  get faceNormals(): Float32Array { return (this.normals ??= faceNormals(this.mesh)); }
 
   fillAll(material: number) {
     this.faceMaterial.fill(material);

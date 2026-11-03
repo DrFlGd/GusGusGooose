@@ -16,9 +16,34 @@ import type { MagnetVoid } from '../voids.ts';
 import { write3mf, write3mfParts, type Material } from '../threemf-write.ts';
 import { splitByMaterial } from '../split-colours.ts';
 import { PaintState } from './paint.ts';
+import { faceIdMap } from './pick.ts';
+import { facesUnderMask, insidePolygon } from '../paint-fill.ts';
 
 type V3 = [number, number, number];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+// ---------- sliders with a number box ----------
+/** Every range input with an `<id>-num` number box: the two follow each other, and a typed value fires the range's input handlers. */
+function pairSliders() {
+  for (const range of document.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
+    const num = document.getElementById(`${range.id}-num`) as HTMLInputElement | null;
+    if (!num) continue;
+    num.value = range.value;
+    range.addEventListener('input', () => { num.value = range.value; });
+    num.addEventListener('change', () => {
+      const v = Math.max(Number(range.min), Math.min(Number(range.max), Number(num.value) || 0));
+      range.value = String(v);
+      num.value = String(v);
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+}
+/** Copies a range's value into its number box after the range was set from code. */
+function syncSlider(id: string) {
+  const num = document.getElementById(`${id}-num`) as HTMLInputElement | null;
+  if (num) num.value = $<HTMLInputElement>(id).value;
+}
+pairSliders();
 
 // ---------- scene ----------
 const view = $('view');
@@ -50,7 +75,7 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); idMap = null; drawOverlay(); });
 resize();
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 
@@ -445,10 +470,7 @@ function placement(): Placement {
 }
 
 function updatePreview() {
-  for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'clearance']) {
-    const v = Number($<HTMLInputElement>(id).value);
-    $(`${id}-out`).textContent = id === 'spin' ? v.toFixed(0) : id === 'clearance' ? v.toFixed(2) : v.toFixed(1);
-  }
+  for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'clearance']) syncSlider(id);
   if (!accessoryObject) return;
   const pt = profile.points[activePoint];
   if (!pt) return;
@@ -503,7 +525,9 @@ for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial',
 $<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTMLSelectElement).value; clearFitted(); renderPoints(); updatePreview(); };
 function pointHint() {
   const w = POINT_WIDTH[activePoint];
-  $<HTMLInputElement>('prep-width').placeholder = w ? `keep size (about ${w} for the ${activePoint.replace('_', ' ')})` : 'keep size';
+  const input = $<HTMLInputElement>('prep-width');
+  input.placeholder = w ? `≈ ${w}` : 'as is';
+  input.title = w ? `Empty keeps the model's size; about ${w} mm suits the ${activePoint.replace('_', ' ')}` : 'Empty keeps the model\'s size';
 }
 
 function clearFitted() {
@@ -543,6 +567,7 @@ function showFitted(mesh: IndexedMesh, faceMaterial?: Uint8Array) {
   if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); }
   fittedObject = new THREE.Mesh(paint.geometry, fittedMaterial);
   scene.add(fittedObject);
+  idMap = null;
   if (accessoryObject) accessoryObject.visible = false;
   hideGhost();
   $<HTMLButtonElement>('paint-tab-button').disabled = false;
@@ -614,7 +639,6 @@ function renderPalette() {
   });
 }
 $('palette-add').onclick = () => { palette.push({ name: `Colour ${palette.length + 1}`, color: '#4f8bd6' }); activeMaterial = palette.length - 1; renderPalette(); };
-$<HTMLInputElement>('brush').oninput = () => { $('brush-out').textContent = Number($<HTMLInputElement>('brush').value).toFixed(1); };
 $('fill-all').onclick = () => { if (paint) { paint.snapshot(); paint.fillAll(activeMaterial); } };
 $('undo').onclick = () => { if (paint && !paint.undo()) status('Nothing to undo.'); };
 $('refine').onclick = async () => {
@@ -704,12 +728,152 @@ function paintAt(e: PointerEvent) {
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
   const hit = raycaster.intersectObject(fittedObject)[0];
-  if (hit && paint.brush(hit.point, Number($<HTMLInputElement>('brush').value), activeMaterial)) {
-    let painted = 0;
-    for (const m of paint.faceMaterial) if (m !== 0) painted++;
-    $('paint-info').textContent = `${paint.faceMaterial.length.toLocaleString()} faces, ${painted.toLocaleString()} painted.`;
+  if (hit && paint.brush(hit.point, Number($<HTMLInputElement>('brush').value), activeMaterial)) updatePaintInfo();
+}
+function updatePaintInfo() {
+  if (!paint) return;
+  let painted = 0;
+  for (const m of paint.faceMaterial) if (m !== 0) painted++;
+  $('paint-info').textContent = `${paint.faceMaterial.length.toLocaleString()} faces, ${painted.toLocaleString()} painted.`;
+}
+
+// ---------- paint tools: bucket, corners, text ----------
+type PaintTool = 'brush' | 'bucket' | 'corners' | 'text';
+let paintTool: PaintTool = 'brush';
+const overlay = $<HTMLCanvasElement>('overlay');
+let corners: [number, number][] = [];
+let hover: [number, number] | null = null;
+function setPaintTool(t: PaintTool) {
+  paintTool = t;
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#paint-tools button')) b.classList.toggle('active', b.dataset.tool === t);
+  for (const x of ['brush', 'bucket', 'corners', 'text']) $(`tool-${x}`).classList.toggle('hidden', x !== t);
+  if (t !== 'corners') clearCorners();
+  drawOverlay();
+}
+for (const b of document.querySelectorAll<HTMLButtonElement>('#paint-tools button')) b.onclick = () => setPaintTool(b.dataset.tool as PaintTool);
+
+// which face is under each pixel: rendered once per camera position, on demand
+let idMap: { ids: Int32Array; w: number; h: number } | null = null;
+controls.addEventListener('change', () => { idMap = null; });
+function faceMap() {
+  if (!fittedObject) return null;
+  const w = view.clientWidth, h = view.clientHeight;
+  if (!idMap || idMap.w !== w || idMap.h !== h) idMap = { ids: faceIdMap(renderer, camera, fittedObject, w, h), w, h };
+  return idMap;
+}
+const faceAt = (x: number, y: number) => { const m = faceMap(); if (!m) return -1; const xi = Math.round(x), yi = Math.round(y); return xi < 0 || yi < 0 || xi >= m.w || yi >= m.h ? -1 : m.ids[yi * m.w + xi]; };
+const local = (e: { clientX: number; clientY: number }): [number, number] => { const r = renderer.domElement.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+/** Where a face's centre lands on screen. */
+function centroidOnScreen(f: number): [number, number] {
+  const c = paint!.centroids;
+  const v = new THREE.Vector3(c[f * 3], c[f * 3 + 1], c[f * 3 + 2]).project(camera);
+  return [((v.x + 1) / 2) * view.clientWidth, ((1 - v.y) / 2) * view.clientHeight];
+}
+function frontFacing(f: number): boolean {
+  const c = paint!.centroids, n = paint!.faceNormals;
+  const dx = c[f * 3] - camera.position.x, dy = c[f * 3 + 1] - camera.position.y, dz = c[f * 3 + 2] - camera.position.z;
+  return n[f * 3] * dx + n[f * 3 + 1] * dy + n[f * 3 + 2] * dz < 0;
+}
+/** Screen pixels per millimetre at the depth of a face (the centre of the part when none is given). */
+function pixelsPerMm(f: number): number {
+  let p: THREE.Vector3;
+  if (f >= 0 && paint) { const c = paint.centroids; p = new THREE.Vector3(c[f * 3], c[f * 3 + 1], c[f * 3 + 2]); }
+  else if (fittedObject) p = new THREE.Box3().setFromObject(fittedObject).getCenter(new THREE.Vector3());
+  else p = controls.target.clone();
+  const dist = Math.max(1, camera.position.distanceTo(p));
+  return (view.clientHeight / 2) / (dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+}
+/** Paints the visible faces under a screen mask, growing over faces too small to own a pixel. */
+function paintUnderMask(inMask: (x: number, y: number) => boolean, what: string) {
+  const map = faceMap();
+  if (!map || !paint) return;
+  const faces = facesUnderMask(map.ids, map.w, map.h, inMask, paint.faceMaterial.length);
+  const grown = paint.grow(faces, (g) => { if (!frontFacing(g)) return false; const [x, y] = centroidOnScreen(g); return inMask(x, y); });
+  paint.snapshot();
+  const n = paint.paintFaces(grown, activeMaterial);
+  updatePaintInfo();
+  status(n ? `${what}: ${n.toLocaleString()} faces painted ${palette[activeMaterial].name}.` : `${what}: nothing under it. Refine the mesh for finer faces, or zoom in.`);
+}
+const textOptions = () => ({
+  text: $<HTMLInputElement>('text-value').value,
+  size: Number($<HTMLInputElement>('text-size').value),
+  angle: Number($<HTMLInputElement>('text-angle').value),
+  font: $<HTMLSelectElement>('text-font').value,
+});
+/** Draws the text into a 2D context at a screen point, as the stamp and the preview do. */
+function placeText(ctx: CanvasRenderingContext2D, x: number, y: number, fontPx: number, mode: 'fill' | 'stroke') {
+  const o = textOptions();
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(THREE.MathUtils.degToRad(-o.angle));
+  ctx.font = o.font.replace('1px', `${fontPx.toFixed(1)}px`);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (mode === 'fill') { ctx.fillStyle = '#fff'; ctx.fillText(o.text, 0, 0); }
+  else { ctx.lineWidth = 1.5; ctx.strokeStyle = '#f2b84b'; ctx.strokeText(o.text, 0, 0); ctx.fillStyle = 'rgba(242,184,75,0.25)'; ctx.fillText(o.text, 0, 0); }
+  ctx.restore();
+}
+function stampText(x: number, y: number) {
+  const o = textOptions();
+  if (!o.text.trim()) { status('Type some text first.'); return; }
+  const f = faceAt(x, y);
+  if (f < 0) { status('Point at the part to stamp the text on it.'); return; }
+  const w = view.clientWidth, h = view.clientHeight;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d')!;
+  placeText(ctx, x, y, o.size * pixelsPerMm(f), 'fill');
+  const data = ctx.getImageData(0, 0, w, h).data;
+  paintUnderMask((px, py) => data[(py * w + px) * 4 + 3] > 127, `"${o.text}"`);
+}
+function applyCorners() {
+  if (corners.length < 3) { status('Click at least three corners first.'); return; }
+  const poly = corners;
+  paintUnderMask((x, y) => insidePolygon(poly, x, y), `${poly.length} corners`);
+  clearCorners();
+}
+function clearCorners() {
+  corners = [];
+  $<HTMLButtonElement>('corners-apply').disabled = true;
+  $('corners-info').textContent = 'No corners yet.';
+  drawOverlay();
+}
+$('corners-apply').onclick = applyCorners;
+$('corners-clear').onclick = clearCorners;
+window.addEventListener('keydown', (e) => {
+  if (tab !== 'paint' || paintTool !== 'corners' || (e.target as HTMLElement).tagName === 'INPUT') return;
+  if (e.key === 'Escape') clearCorners();
+  if (e.key === 'Enter') applyCorners();
+});
+/** The 2D layer over the view: the corners so far and the text about to be stamped. */
+function drawOverlay() {
+  const w = view.clientWidth, h = view.clientHeight;
+  if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
+  const ctx = overlay.getContext('2d')!;
+  ctx.clearRect(0, 0, w, h);
+  if (tab !== 'paint' || !paint) return;
+  if (paintTool === 'corners' && corners.length) {
+    ctx.beginPath();
+    corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    if (hover) ctx.lineTo(hover[0], hover[1]);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(242,184,75,0.18)'; ctx.fill();
+    ctx.strokeStyle = '#f2b84b'; ctx.lineWidth = 1.5; ctx.stroke();
+    for (const [x, y] of corners) { ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fillStyle = '#f2b84b'; ctx.fill(); }
+  }
+  if (paintTool === 'text' && hover) {
+    const f = faceAt(hover[0], hover[1]);
+    placeText(ctx, hover[0], hover[1], textOptions().size * pixelsPerMm(f), 'stroke');
   }
 }
+for (const id of ['text-value', 'text-size', 'text-angle', 'text-font']) $<HTMLInputElement>(id).addEventListener('input', drawOverlay);
+renderer.domElement.addEventListener('pointerleave', () => { hover = null; drawOverlay(); });
+renderer.domElement.addEventListener('dblclick', (e) => {
+  if (tab !== 'paint' || paintTool !== 'corners') return;
+  e.preventDefault();
+  corners.pop(); // the second click of the double added one more corner
+  applyCorners();
+});
 
 // ---------- tabs ----------
 let tab = 'accessory';
@@ -721,6 +885,7 @@ function setTab(name: string) {
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   applyFocus();
   if (name !== 'accessory') showGizmo(false);
+  drawOverlay();
   // in paint mode the left button paints and the right button orbits
   controls.mouseButtons = name === 'paint'
     ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
@@ -729,12 +894,15 @@ function setTab(name: string) {
 for (const b of document.querySelectorAll<HTMLButtonElement>('.tabs button')) b.onclick = () => setTab(b.dataset.tab!);
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (tab !== 'paint' || e.button !== 0 || !paint) return;
+  if (tab !== 'paint' || e.button !== 0 || !paint || paintTool !== 'brush') return;
   painting = true;
   paint.snapshot();
   paintAt(e);
 });
-renderer.domElement.addEventListener('pointermove', (e) => { if (painting) paintAt(e); });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (painting) paintAt(e);
+  if (tab === 'paint' && (paintTool === 'text' || paintTool === 'corners')) { hover = local(e); drawOverlay(); }
+});
 window.addEventListener('pointerup', () => { painting = false; });
 
 // ---------- clothing ----------
@@ -768,8 +936,6 @@ function garmentOptions(): Partial<WrapOptions> {
     tags: modelTags ?? undefined,
   };
 }
-$<HTMLInputElement>('cloth-lean').oninput = () => { $('cloth-lean-out').textContent = $<HTMLInputElement>('cloth-lean').value; };
-$<HTMLInputElement>('wrap-turn').oninput = () => { $('wrap-turn-out').textContent = $<HTMLInputElement>('wrap-turn').value; };
 
 // ghost preview of the loaded model, cropped, where the wrap will put it; the body profile is cached per hem/neck/lean
 let cavityKey = '', cavity: Cavity | null = null;
@@ -806,12 +972,10 @@ function wrapPreview() {
 for (const id of ['wrap-turn', 'wrap-dx', 'wrap-dy', 'wrap-band-lo', 'wrap-band-hi', 'wrap-crop-l', 'wrap-crop-r', 'wrap-crop-f', 'wrap-crop-b', 'cloth-keep-top', 'cloth-spread', 'cloth-spread-height', 'cloth-lean', 'cloth-front', 'cloth-hem', 'cloth-neck']) {
   $<HTMLInputElement>(id).addEventListener('input', wrapPreview);
 }
-$<HTMLInputElement>('cloth-neckline-width').oninput = () => { $('cloth-neckline-width-out').textContent = $<HTMLInputElement>('cloth-neckline-width').value; };
-$<HTMLInputElement>('cloth-front').oninput = () => { $('cloth-front-out').textContent = $<HTMLInputElement>('cloth-front').value; };
 function updateGuides() {
   const o = garmentOptions();
-  $('cloth-hem-out').textContent = String(o.hem);
-  $('cloth-neck-out').textContent = String(o.neck);
+  syncSlider('cloth-hem');
+  syncSlider('cloth-neck');
   const bb = gooseMesh ? gooseObject.geometry.boundingBox ?? gooseObject.geometry.computeBoundingBox() ?? gooseObject.geometry.boundingBox : null;
   const cx = bb ? (bb.min.x + bb.max.x) / 2 : 115, cy = bb ? (bb.min.y + bb.max.y) / 2 : 140;
   hemRing.position.set(cx, cy, o.hem!);
@@ -865,6 +1029,25 @@ let downAt = [0, 0];
 renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return; // a drag, not a click
+  if (tab === 'paint' && e.button === 0 && paint && fittedObject) {
+    const [x, y] = local(e);
+    if (paintTool === 'bucket') {
+      const f = faceAt(x, y);
+      if (f < 0) { status('Click on the part to fill a region.'); return; }
+      paint.snapshot();
+      const n = paint.bucket(f, activeMaterial, Number($<HTMLInputElement>('bucket-angle').value));
+      updatePaintInfo();
+      status(n ? `Filled ${n.toLocaleString()} faces ${palette[activeMaterial].name}.` : 'That region is already this colour.');
+    } else if (paintTool === 'corners') {
+      corners.push([x, y]);
+      $<HTMLButtonElement>('corners-apply').disabled = corners.length < 3;
+      $('corners-info').textContent = `${corners.length} corner${corners.length === 1 ? '' : 's'}.${corners.length >= 3 ? ' Double-click, Enter or Fill inside to paint.' : ''}`;
+      drawOverlay();
+    } else if (paintTool === 'text') {
+      stampText(x, y);
+    }
+    return;
+  }
   if (tab === 'accessory' && accessoryObject && accessoryObject.visible && !gizmo.dragging) {
     const rect = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
@@ -938,6 +1121,8 @@ function download(name: string, bytes: Uint8Array) {
   get gooseVisible() { return gooseObject.visible; },
   get ringsShown() { return !!gizmo.object; },
   showRings(on: boolean) { showGizmo(on); },
+  setPaintTool(t: string) { setPaintTool(t as PaintTool); },
+  faceAt(x: number, y: number) { return faceAt(x, y); },
   toScreen(p: V3) {
     const v = new THREE.Vector3(...p).project(camera);
     const rect = renderer.domElement.getBoundingClientRect();

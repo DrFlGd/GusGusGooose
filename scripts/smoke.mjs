@@ -89,6 +89,38 @@ await page.mouse.move(ex, ey, { steps: 12 });
 await page.mouse.up();
 const paintedFaces = await page.evaluate(() => document.getElementById('paint-info').textContent);
 console.log('3d. after stroke:', paintedFaces);
+// the other paint tools on the head puck, refined first so letters have faces to land on
+await page.click('#refine');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Refined'), null, { timeout: 60000 });
+const mid = [(sx + ex) / 2, (sy + ey) / 2];
+await page.evaluate(() => window.__goose.setPaintTool('bucket'));
+await page.evaluate(() => { document.querySelector('#palette .swatch:nth-child(4)').click(); });
+await page.mouse.click(mid[0], mid[1]);
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Filled'), null, { timeout: 10000 });
+console.log('3h. bucket:', await status());
+await page.evaluate(() => window.__goose.setPaintTool('corners'));
+await page.evaluate(() => { document.querySelector('#palette .swatch:nth-child(2)').click(); });
+const quad = await page.evaluate(() => {
+  const h = window.__goose.profile.points.head;
+  const top = h.center.map((c, i) => c + h.axis[i] * 6);
+  return [[-4, -4], [4, -4], [4, 4], [-4, 4]].map(([dx, dy]) => window.__goose.toScreen([top[0] + dx, top[1] + dy, top[2]]));
+});
+for (const [x, y] of quad) { await page.mouse.click(x, y); await new Promise((r) => setTimeout(r, 50)); }
+await page.click('#corners-apply');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('corners'), null, { timeout: 10000 });
+console.log('3i. corners:', await status());
+await page.evaluate(() => window.__goose.setPaintTool('text'));
+await page.evaluate(() => { document.querySelector('#palette .swatch:nth-child(3)').click(); });
+await page.fill('#text-value', 'GO');
+await page.fill('#text-size', '5');
+await page.dispatchEvent('#text-size', 'input');
+await page.mouse.move(mid[0] + 2, mid[1] + 2);
+await page.mouse.click(mid[0], mid[1]);
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('"GO"'), null, { timeout: 10000 });
+console.log('3j. text:', await status());
+await page.screenshot({ path: join(out, '3j-tools.png') });
+for (const line of [await page.evaluate(() => document.getElementById('status').textContent)]) if (/nothing under/.test(line)) throw new Error('text stamp painted nothing');
+await page.evaluate(() => window.__goose.setPaintTool('brush'));
 const [download] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-3mf')]);
 const threemf = join(out, 'accessory.3mf');
 await download.saveAs(threemf);
@@ -103,7 +135,7 @@ const shown = await page.evaluate(() => window.__goose.gooseVisible);
 console.log('3f. focus hides the goose:', !hidden, '| back after:', shown);
 if (hidden || !shown) throw new Error('focus view did not toggle the goose');
 // one part per colour
-await page.click('#tab-paint details summary');
+await page.click('#split-details summary');
 const [splitDl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('#export-split')]);
 await page.waitForFunction(() => document.getElementById('split-info').textContent.includes('parts'), null, { timeout: 60000 });
 console.log('3g.', await page.locator('#split-info').textContent(), '→', splitDl.suggestedFilename());
@@ -122,6 +154,7 @@ await page.waitForFunction(() => document.getElementById('status').textContent.i
 console.log('6.', await page.locator('#model-info').textContent());
 await page.selectOption('#prep-down', '+z');
 await page.fill('#prep-width', '20');
+await page.evaluate(() => { for (const d of document.querySelectorAll('#prepare-controls details')) d.open = true; }); // the fill sits in a closed details
 await page.fill('#prep-fill', '6');
 await page.dispatchEvent('#prep-fill', 'change');
 await page.waitForFunction(() => document.getElementById('status').textContent.includes('Filled'), null, { timeout: 60000 });
@@ -174,7 +207,7 @@ await page.screenshot({ path: join(out, '7f-cleared.png') });
 
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
-const box = await page.locator('#view canvas').boundingBox();
+const box = await page.locator('#view canvas[data-engine]').boundingBox();
 await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
 await page.waitForFunction(() => document.getElementById('pick').textContent.startsWith('Picked'), null, { timeout: 5000 });
 console.log('4.', await page.locator('#pick').textContent());

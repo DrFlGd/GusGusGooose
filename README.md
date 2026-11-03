@@ -27,10 +27,15 @@ two halves with small disc-magnet pockets along the seams, and a form-fit
 option lets the halves hug the chest and the tail. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
 pause height reported, and exports the holed goose. The Paint tab (after
-a fit or a garment) brushes faces with a palette of your filament colours,
-with Refine to split the mesh for finer edges, Fill all and Undo, and
-exports a 3MF whose colour regions the slicer maps to filaments (STL stays
-for single-colour parts). A 3MF that comes in with colours keeps them: each
+a fit or a garment) paints faces with a palette of your filament colours:
+a brush, a bucket that fills a region until it meets another colour or a
+crease (the angle is yours to set), a corners tool that fills whatever you
+can see inside the corners you click, and a text stamp placed as seen from
+the camera (type the text, set the letter height and angle, click to
+stamp); with Refine to split the mesh so edges and letters come out finer,
+Fill all and Undo. It exports a 3MF whose colour regions the slicer maps
+to filaments (STL stays for single-colour parts). The panel walks each tab
+in numbered steps and every slider has a number box beside it. A 3MF that comes in with colours keeps them: each
 part's filament slot, paint applied in Bambu Studio or PrusaSlicer (a
 triangle painted in more than one colour takes the colour covering most of
 it), and standard 3MF material groups, including the app's own exports.
@@ -71,15 +76,20 @@ goose is in `goose/goose.3mf` (Bambu Studio project, v1.2.3 blank, full
 colour assembly) and `goose/goose-voids.3mf` (the bare white body and nose
 with the magnet voids as Bambu negative parts). `goose/goose.stl` is built
 from both: body, beak, feet, base disc, minus the leg pin holes and the
-magnet voids mapped across from the second file (63,586 triangles,
-100 x 131 x 183 mm). `goose/profile.json` holds the four magnet points read
+magnet voids mapped across from the second file, plus the eyes (63,954
+triangles, 100 x 131 x 183 mm). `goose/profile.json` holds the four magnet points read
 straight from those negative parts: head 10.2 dia x 4.2 disc, wings
 10.2 x 10.2 x 4.2 blocks, beak 8 dia x 4.2 disc with its insertion slot.
 All four are embedded (inserted at print pauses), so accessories align to
 the centre of each void's outer face projected to the surface. The eyes are
-printed separately and are not in the model. `goose/goose-colors.json`
+printed separately (`black.stl` in the voids project, loose on the plate)
+and go into a 3.5 mm pin channel through the head: the build finds that
+channel (a round hole open at both ends), fills it, and seats each eye in
+a mouth of it, pin in and dome out, so every boolean sees a closed head
+with the eye domes on it and a hat over the eyes is carved around them
+instead of leaving plugs into the holes. `goose/goose-colors.json`
 carries each triangle's filament (orange beak, feet and nose; white body;
-the base disc) from the project file, for the viewer only.
+the base disc; black eyes) from the project file, for the viewer only.
 
 ## Use
 

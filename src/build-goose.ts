@@ -16,13 +16,21 @@ import type { Material } from './threemf-write.ts';
 import type { GooseColors } from './goose-colors.ts';
 export type { GooseColors } from './goose-colors.ts';
 import { mapNegatives, primitivesToPoints, type VoidPrimitive } from './map-voids.ts';
+import { findVoids, type Tube } from './voids.ts';
 
-export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = [], log = (s: string) => console.log(s)): Promise<{ goose: ManifoldT; solid: ManifoldT; colors: GooseColors; faceMaterial: Uint8Array }> {
+/**
+ * Builds the solid every boolean runs against. `eyes` is the loose eye part
+ * (pieces modelled standing on their flat pin end, dome up): the pin channel
+ * through the head is filled and each eye is seated in a mouth of it, so an
+ * accessory over the eyes is carved around the domes and never opens the hole.
+ */
+export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = [], log = (s: string) => console.log(s), eyes?: Part): Promise<{ goose: ManifoldT; solid: ManifoldT; colors: GooseColors; faceMaterial: Uint8Array }> {
   const { Manifold } = await manifold();
   // one material per filament slot the printed parts use, named after those parts
-  const slots = [...new Set(parts.filter((p) => p.kind === 'normal').map((p) => p.extruder ?? 1))].sort((a, b) => a - b);
+  const printed = [...parts.filter((p) => p.kind === 'normal'), ...(eyes ? [eyes] : [])];
+  const slots = [...new Set(printed.map((p) => p.extruder ?? 1))].sort((a, b) => a - b);
   const materials: Material[] = slots.map((slot) => {
-    const users = parts.filter((p) => p.kind === 'normal' && (p.extruder ?? 1) === slot);
+    const users = printed.filter((p) => (p.extruder ?? 1) === slot);
     const names = [...new Set(users.map((p) => p.name.replace(/\s*\(.*\)|\.stl|_\d+$/gi, '').trim()))];
     return { name: names.join(' + '), color: users.find((p) => p.color)?.color ?? '#e9dcc3' };
   });
@@ -49,7 +57,11 @@ export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = []
     holes.push(await toManifold(h.mesh));
   }
   const solid = Manifold.union(solids);
-  const goose = holes.length ? solid.subtract(Manifold.union(holes)) : solid;
+  let goose = holes.length ? solid.subtract(Manifold.union(holes)) : solid;
+  if (eyes) {
+    const seated = await seatEyes(goose, eyes, slots.indexOf(eyes.extruder ?? 1), firstID, log);
+    if (seated) goose = Manifold.union([goose, ...seated]);
+  }
   const tagged = fromManifoldTagged(goose, firstID, materials.length, fallback);
   // the STL on disk loses degenerate triangles when read back; keep the colours aligned with what survives
   const keep = survivesRoundTrip(tagged.mesh);
@@ -59,6 +71,55 @@ export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = []
     if (runs.length && runs[runs.length - 1][0] === m) runs[runs.length - 1][1]++; else runs.push([m, 1]);
   }
   return { goose, solid, colors: { materials, runs }, faceMaterial };
+}
+
+/**
+ * Seats the eye pieces: the channel through the head whose radius matches the
+ * pins is filled (so it is closed for every boolean), and each eye goes into a
+ * mouth of it with its pin inside and its dome standing on the surface.
+ * Returns the filler and the seated eyes, or null with a note when the eyes
+ * and the head do not match.
+ */
+export async function seatEyes(goose: ManifoldT, eyes: Part, material: number, firstID: number, log = (s: string) => console.log(s)): Promise<ManifoldT[] | null> {
+  const { Manifold } = await manifold();
+  const f = (n: number) => n.toFixed(1);
+  const pieces = (await toManifold(eyes.mesh)).decompose().filter((p) => p.volume() > 1);
+  const pins = pieces.map((p) => {
+    const bb = p.boundingBox();
+    // the pin runs from the bottom up to the widest cross-section, where the dome begins (a real pin may taper a little)
+    const areas: [number, number][] = [];
+    for (let z = bb.min[2] + 0.2; z < bb.max[2] - 0.2; z += 0.1) areas.push([z, p.slice(z).area()]);
+    const widest = Math.max(...areas.map((a) => a[1]));
+    const top = areas.find((a) => a[1] >= widest * 0.98)![0];
+    return { solid: p, radius: Math.sqrt(widest / Math.PI), length: top - bb.min[2], top, center: [(bb.min[0] + bb.max[0]) / 2, (bb.min[1] + bb.max[1]) / 2] as [number, number] };
+  });
+  if (!pins.length) { log('  eyes: no pieces'); return null; }
+  const tubes: Tube[] = [];
+  findVoids(fromManifold(goose), tubes);
+  const r = pins[0].radius;
+  const channel = tubes.filter((t) => Math.abs(t.radius - r) < 0.6).sort((a, b) => b.wallFaces - a.wallFaces)[0];
+  if (!channel) { log(`  eyes: no channel through the goose matches the ${f(r * 2)} mm pins (tubes: ${tubes.map((t) => `${f(t.radius * 2)} mm x ${f(t.length)}`).join(', ') || 'none'})`); return null; }
+  log(`  eyes: ${pins.length} pieces, ${f(r * 2)} mm pins ${f(pins[0].length)} mm long; channel ${f(channel.radius * 2)} x ${f(channel.length)} mm at (${channel.center.map(f).join(', ')}) axis (${channel.axis.map(f).join(', ')})`);
+  const toward = (d: [number, number, number]) => {
+    const theta = (Math.acos(Math.max(-1, Math.min(1, d[2]))) * 180) / Math.PI;
+    const phi = (Math.atan2(d[1], d[0]) * 180) / Math.PI;
+    return [0, theta, phi] as [number, number, number];
+  };
+  const mid = channel.ends[0].map((v, i) => (v + channel.ends[1][i]) / 2) as [number, number, number];
+  const filler = Manifold.cylinder(channel.length, channel.radius + 0.1, channel.radius + 0.1, 48, true).rotate(toward(channel.axis)).translate(mid);
+  const out: ManifoldT[] = [filler];
+  const outward: [number, number, number][] = [channel.axis.map((v) => -v) as [number, number, number], channel.axis];
+  pins.slice(0, 2).forEach((pin, i) => {
+    const placed = pin.solid.translate([-pin.center[0], -pin.center[1], -pin.top]).rotate(toward(outward[i])).translate(channel.ends[i]);
+    out.push(placed);
+  });
+  return Promise.all(out.map((m) => retag(m, firstID, material)));
+}
+
+/** Re-tags every face of a manifold with one material run ID. */
+async function retag(m: ManifoldT, firstID: number, material: number): Promise<ManifoldT> {
+  const mesh = fromManifold(m);
+  return toManifoldTagged(mesh, new Uint8Array(mesh.triangles.length / 3).fill(material), firstID);
 }
 
 function bounds(m: { positions: Float32Array }) {
@@ -78,12 +139,18 @@ if (process.argv[1]?.endsWith('build-goose.ts')) {
   const parts = read3mf(src);
   console.log(`${parts.length} parts in ${src}`);
   let voids: VoidPrimitive[] = [];
+  let eyes: Part | undefined;
   if (opt('voids')) {
     const voidParts = read3mf(opt('voids')!);
     voids = mapNegatives(parts, voidParts);
     console.log(`${voids.length} negative parts mapped from ${opt('voids')}`);
+    // the eyes are loose in the voids project (printed separately, modelled standing on the plate)
+    eyes = [...voidParts, ...parts].find((p) => p.kind === 'normal' && /eye|black/i.test(p.name));
+    // the voids project does not carry the eye filament's real colour; the part is named after it
+    if (eyes && /black/i.test(eyes.name)) eyes = { ...eyes, color: '#1a1a1a' };
+    if (eyes) console.log(`eyes: ${eyes.name} (${eyes.mesh.triangles.length / 3} tris${eyes.color ? `, ${eyes.color}` : ''})`);
   }
-  const { goose, solid, colors } = await buildGoose(parts, voids);
+  const { goose, solid, colors } = await buildGoose(parts, voids, undefined, eyes);
   const mesh = fromManifold(goose);
   writeStl(out, mesh);
   const colorsPath = out.replace(/\.stl$/i, '') + '-colors.json';

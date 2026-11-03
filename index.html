@@ -9,26 +9,63 @@
 <body>
   <div id="app">
     <aside id="panel">
-      <h1>Gus Gus Goose</h1>
-      <p id="status" class="muted">Loading goose…</p>
+      <header class="brand">
+        <h1>Gus Gus Goose</h1>
+        <span class="muted small">fit, dress and paint the desk goose</span>
+      </header>
+      <p id="status" class="status">Loading goose…</p>
 
       <nav class="tabs">
         <button data-tab="accessory" class="active">Accessory</button>
         <button data-tab="clothing">Clothing</button>
-        <button data-tab="hole">Magnet hole</button>
-        <button data-tab="paint" id="paint-tab-button" disabled title="Fit an accessory first">Paint</button>
+        <button data-tab="paint" id="paint-tab-button" disabled title="Fit an accessory or make a garment first">Paint</button>
+        <button data-tab="hole">Hole</button>
       </nav>
 
+      <!-- ============ Accessory ============ -->
       <section id="tab-accessory" class="tab">
-        <label class="file">
-          <input type="file" id="accessory-file" accept=".stl,.obj,.3mf" />
-          <span>Load a model (STL, OBJ or 3MF), or drop it on the view</span>
-        </label>
-        <div class="row"><button id="clear-model" disabled title="Nothing loaded">Clear model</button></div>
-        <label class="check"><input type="checkbox" id="repair-import" checked /> Repair models that are not valid solids on import (rebuilt on a voxel grid of <input type="number" id="repair-voxel" step="0.1" min="0.3" max="3" value="" placeholder="auto" /> mm, down to 0.3 for more detail at the cost of a longer wait; details smaller than that are lost)</label>
-        <div id="prepare-controls" class="hidden">
+        <div class="step">
+          <h2><span class="n">1</span>Load a model</h2>
+          <label class="file">
+            <input type="file" id="accessory-file" accept=".stl,.obj,.3mf" />
+            <span><b>Choose a file</b> or drop it on the view<br /><span class="muted">STL, OBJ or 3MF from Printables, MakerWorld…</span></span>
+          </label>
           <p id="model-info" class="small muted"></p>
-          <label>Side that meets the goose
+          <div class="row">
+            <button id="clear-model" disabled title="Nothing loaded">Clear model</button>
+          </div>
+          <details>
+            <summary>Import repair</summary>
+            <label class="check"><input type="checkbox" id="repair-import" checked /> Rebuild models that are not valid solids</label>
+            <div class="field"><span>Voxel size</span><span class="val"><input type="number" id="repair-voxel" step="0.1" min="0.3" max="3" value="" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <p class="small muted">Smaller keeps more detail and takes longer; 0.3 is the finest. Details below the voxel size are lost.</p>
+          </details>
+          <details id="generator">
+            <summary>Or generate a plain base</summary>
+            <div class="field"><span>Shape</span>
+              <select id="gen-shape">
+                <option value="puck">Puck (cylinder)</option>
+                <option value="dome">Dome (half sphere)</option>
+                <option value="plate">Plate (rounded box)</option>
+                <option value="ring">Ring (washer)</option>
+              </select>
+            </div>
+            <div class="field"><span>Width / diameter</span><span class="val"><input type="number" id="gen-w" step="0.5" value="20" /><span class="unit">mm</span></span></div>
+            <div class="field hidden" id="gen-d-row"><span>Depth</span><span class="val"><input type="number" id="gen-d" step="0.5" value="14" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Height</span><span class="val"><input type="number" id="gen-h" step="0.5" value="8" /><span class="unit">mm</span></span></div>
+            <div class="field hidden" id="gen-i-row"><span>Inner diameter</span><span class="val"><input type="number" id="gen-i" step="0.5" value="12" /><span class="unit">mm</span></span></div>
+            <div class="row"><button id="generate">Use this base</button></div>
+            <p class="muted small">Sized so the magnet pocket fits with 1.5 mm of wall. Fit it, export it and build the decorative part on top in your CAD, or add a decoration STL and it is joined on top.</p>
+            <label class="file small">
+              <input type="file" id="decoration-file" accept=".stl" />
+              <span>Add a decoration STL on top of the base</span>
+            </label>
+          </details>
+        </div>
+
+        <div id="prepare-controls" class="step hidden">
+          <h2><span class="n">2</span>Prepare</h2>
+          <div class="field"><span>Side that meets the goose</span>
             <select id="prep-down">
               <option value="-z">Bottom (−Z, as downloaded)</option>
               <option value="+z">Top (+Z, flip it over)</option>
@@ -37,235 +74,324 @@
               <option value="-x">Left (−X)</option>
               <option value="+x">Right (+X)</option>
             </select>
-          </label>
-          <label>Width across the goose <input type="number" id="prep-width" step="0.5" placeholder="keep size" /> mm</label>
-          <label>Scale × <input type="number" id="prep-scale" step="0.01" value="1" /> <span class="muted small">(25.4 for a model in inches; ignored when a width is set)</span></label>
-          <label>Centre on
+          </div>
+          <div class="field"><span>Width across the goose</span><span class="val"><input type="number" id="prep-width" step="0.5" placeholder="as is" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Scale</span><span class="val"><span class="unit">×</span><input type="number" id="prep-scale" step="0.01" value="1" /></span></div>
+          <p class="small muted">25.4 for a model in inches. Ignored when a width is set.</p>
+          <div class="field"><span>Centre on</span>
             <select id="prep-centre">
               <option value="bbox">the whole model</option>
               <option value="footprint">the bottom face only</option>
             </select>
-          </label>
-          <label>Fill the hollow underside <input type="number" id="prep-fill" step="0.5" min="0" value="0" /> mm deep (0 = off)</label>
-          <p class="muted small">Fills the cavity the walls enclose above the magnet point, from its floor up by this depth, following the walls and never through the top, so a hollow hat has material to carve and to hold the magnet. The fill's floor becomes the base; a brim that dips lower hangs below it. 8 mm suits a 4.2 mm magnet.</p>
-          <label>Or a plain plug: diameter <input type="number" id="prep-plug-d" step="0.5" value="0" /> mm, height <input type="number" id="prep-plug-h" step="0.5" value="8" /> mm</label>
-          <p class="muted small">A plug is a solid cylinder from the base up into the model, for models with no enclosed cavity to fill.</p>
-        </div>
-        <details id="generator">
-          <summary>Or generate a plain base</summary>
-          <label>Shape
-            <select id="gen-shape">
-              <option value="puck">Puck (cylinder)</option>
-              <option value="dome">Dome (half sphere)</option>
-              <option value="plate">Plate (rounded box)</option>
-              <option value="ring">Ring (washer)</option>
-            </select>
-          </label>
-          <label>Width / diameter <input type="number" id="gen-w" step="0.5" value="20" /> mm</label>
-          <label id="gen-d-row" class="hidden">Depth <input type="number" id="gen-d" step="0.5" value="14" /> mm</label>
-          <label>Height <input type="number" id="gen-h" step="0.5" value="8" /> mm</label>
-          <label id="gen-i-row" class="hidden">Inner diameter <input type="number" id="gen-i" step="0.5" value="12" /> mm</label>
-          <div class="row"><button id="generate">Use this base</button></div>
-          <p class="muted small">A base is sized so the magnet pocket fits with 1.5 mm of wall; fit it, export it, and build the decorative part on top in your CAD, or load a decoration STL and it is unioned onto the base.</p>
-          <label class="file">
-            <input type="file" id="decoration-file" accept=".stl" />
-            <span>Add decoration STL on top of the base</span>
-          </label>
-        </details>
-        <div id="accessory-controls" class="hidden">
-          <label>Magnet point
-            <select id="point"></select>
-          </label>
-          <label>Sink into goose <output id="sink-out">2.0</output> mm
-            <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
-          </label>
-          <p class="small muted">Click the model to show rotation rings; drag a ring to tilt or spin it, click empty space to hide them. The sliders fine-tune.</p>
-          <label>Spin (blue ring) <output id="spin-out">0</output>°
-            <input type="range" id="spin" min="-180" max="180" step="1" value="0" />
-          </label>
-          <label>Tilt (red ring) <output id="tilt-x-out">0.0</output>°
-            <input type="range" id="tilt-x" min="-90" max="90" step="0.5" value="0" />
-          </label>
-          <label>Tilt (green ring) <output id="tilt-y-out">0.0</output>°
-            <input type="range" id="tilt-y" min="-90" max="90" step="0.5" value="0" />
-          </label>
-          <label>Slide X <output id="dx-out">0.0</output> mm
-            <input type="range" id="dx" min="-30" max="30" step="0.5" value="0" />
-          </label>
-          <label>Slide Y <output id="dy-out">0.0</output> mm
-            <input type="range" id="dy" min="-30" max="30" step="0.5" value="0" />
-          </label>
+          </div>
           <details>
-            <summary>Pocket (defaults mirror the goose magnet)</summary>
-            <label>Magnet diameter <input type="number" id="pocket-dia" step="0.1" placeholder="auto" /></label>
-            <label>Magnet thickness <input type="number" id="pocket-thick" step="0.1" placeholder="auto" /></label>
-            <label>Radial clearance <input type="number" id="pocket-radial" step="0.05" placeholder="0" /></label>
-            <label>Axial clearance <input type="number" id="pocket-axial" step="0.05" placeholder="0.1" /></label>
-            <label class="check"><input type="checkbox" id="pocket-none" /> No pocket</label>
+            <summary>Hollow models: fill the underside</summary>
+            <div class="field"><span>Fill depth</span><span class="val"><input type="number" id="prep-fill" step="0.5" min="0" value="0" /><span class="unit">mm</span></span></div>
+            <p class="muted small">0 is off. Fills the cavity the walls enclose above the magnet point, from its floor up by this depth, following the walls and never through the top, so a hollow hat has material to carve and to hold the magnet. The fill's floor becomes the base. 8 mm suits a 4.2 mm magnet.</p>
+            <div class="field"><span>Or a plain plug</span><span class="val"><input type="number" id="prep-plug-d" step="0.5" value="0" /><span class="unit">dia</span><input type="number" id="prep-plug-h" step="0.5" value="8" /><span class="unit">high</span></span></div>
+            <p class="muted small">A solid cylinder from the base up into the model, for models with no enclosed cavity to fill.</p>
           </details>
-          <label>Surface clearance <output id="clearance-out">0.20</output> mm
-            <input type="range" id="clearance" min="0" max="0.6" step="0.05" value="0.2" />
-          </label>
-          <div class="row">
-            <button id="fit" class="primary">Fit</button>
+        </div>
+
+        <div id="accessory-controls" class="step hidden">
+          <h2><span class="n">3</span>Place</h2>
+          <div class="field"><span>Magnet point</span><select id="point"></select></div>
+          <div class="slider">
+            <div class="slider-head"><span>Sink into the goose</span><span class="val"><input type="number" id="sink-num" step="0.5" min="0" max="15" /><span class="unit">mm</span></span></div>
+            <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
+          </div>
+          <p class="small muted">Click the model in the view for rotation rings: drag the red or green ring to tilt it, the blue one to spin it. Click empty space to hide them.</p>
+          <div class="slider">
+            <div class="slider-head"><span><i class="dot blue"></i>Spin</span><span class="val"><input type="number" id="spin-num" step="1" min="-180" max="180" /><span class="unit">°</span></span></div>
+            <input type="range" id="spin" min="-180" max="180" step="1" value="0" />
+          </div>
+          <div class="slider">
+            <div class="slider-head"><span><i class="dot red"></i>Tilt</span><span class="val"><input type="number" id="tilt-x-num" step="0.5" min="-90" max="90" /><span class="unit">°</span></span></div>
+            <input type="range" id="tilt-x" min="-90" max="90" step="0.5" value="0" />
+          </div>
+          <div class="slider">
+            <div class="slider-head"><span><i class="dot green"></i>Tilt</span><span class="val"><input type="number" id="tilt-y-num" step="0.5" min="-90" max="90" /><span class="unit">°</span></span></div>
+            <input type="range" id="tilt-y" min="-90" max="90" step="0.5" value="0" />
+          </div>
+          <div class="slider">
+            <div class="slider-head"><span>Slide X</span><span class="val"><input type="number" id="dx-num" step="0.5" min="-30" max="30" /><span class="unit">mm</span></span></div>
+            <input type="range" id="dx" min="-30" max="30" step="0.5" value="0" />
+          </div>
+          <div class="slider">
+            <div class="slider-head"><span>Slide Y</span><span class="val"><input type="number" id="dy-num" step="0.5" min="-30" max="30" /><span class="unit">mm</span></span></div>
+            <input type="range" id="dy" min="-30" max="30" step="0.5" value="0" />
+          </div>
+          <details>
+            <summary>Pocket and clearance</summary>
+            <p class="small muted">The pocket mirrors the goose's magnet unless set here.</p>
+            <div class="field"><span>Magnet diameter</span><span class="val"><input type="number" id="pocket-dia" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Magnet thickness</span><span class="val"><input type="number" id="pocket-thick" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Radial clearance</span><span class="val"><input type="number" id="pocket-radial" step="0.05" placeholder="0" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Axial clearance</span><span class="val"><input type="number" id="pocket-axial" step="0.05" placeholder="0.1" /><span class="unit">mm</span></span></div>
+            <label class="check"><input type="checkbox" id="pocket-none" /> No pocket</label>
+            <div class="slider">
+              <div class="slider-head"><span>Surface clearance</span><span class="val"><input type="number" id="clearance-num" step="0.05" min="0" max="0.6" /><span class="unit">mm</span></span></div>
+              <input type="range" id="clearance" min="0" max="0.6" step="0.05" value="0.2" />
+            </div>
+          </details>
+          <div class="actions">
+            <button id="fit" class="primary">Fit to the goose</button>
             <button id="export-fitted" disabled>Export STL</button>
           </div>
           <p id="fit-result" class="small"></p>
+          <p class="small muted">Then paint it on the Paint tab.</p>
         </div>
       </section>
 
+      <!-- ============ Clothing ============ -->
       <section id="tab-clothing" class="tab hidden">
-        <p class="small muted">A shirt, sweater or coat that follows the body between two heights and slips on over the head. No magnets. The two rings on the goose show the hem and neck.</p>
-        <label class="file">
-          <input type="file" id="cloth-file" accept=".stl,.obj,.3mf" />
-          <span>Load a model to wrap (STL, OBJ or 3MF), or drop it on the view</span>
-        </label>
-        <p id="cloth-model" class="small muted">No model loaded; Make shirt needs none.</p>
-        <div class="row"><button id="clear-cloth" disabled title="Nothing to clear">Clear model and garment</button></div>
-        <label>Hem height <output id="cloth-hem-out">46</output> mm
-          <input type="range" id="cloth-hem" min="10" max="150" step="1" value="46" />
-        </label>
-        <label>Neck height <output id="cloth-neck-out">108</output> mm
-          <input type="range" id="cloth-neck" min="20" max="175" step="1" value="108" />
-        </label>
-        <label>Wall thickness <input type="number" id="cloth-thick" step="0.1" value="1.6" /> mm</label>
-        <label>Clearance to the body <input type="number" id="cloth-clear" step="0.05" value="0.4" /> mm</label>
-        <label>Collar
-          <select id="cloth-collar">
-            <option value="tilt">Opens at the front; goes on tilted, beak first</option>
-            <option value="drop">Clears head and beak; drops straight on</option>
-          </select>
-        </label>
-        <label>Extra gap at the neck <input type="number" id="cloth-gap" step="0.5" value="1" /> mm</label>
-        <label>Spread the collar <input type="number" id="cloth-spread" step="0.5" min="0" value="0" /> mm out from the neck and chest, over the top <input type="number" id="cloth-spread-height" step="1" min="1" value="15" /> mm</label>
-        <details open>
-          <summary>Neckline and collar</summary>
-          <label>Neckline
-            <select id="cloth-neckline">
-              <option value="v">V</option>
-              <option value="scoop">Scoop (round)</option>
-              <option value="crew">Crew (none)</option>
-            </select>
+        <div class="step">
+          <h2><span class="n">1</span>Garment</h2>
+          <p class="small muted">A shirt made here, or a loaded model wrapped onto the body. It follows the body between two heights and slips on over the head. No magnets.</p>
+          <label class="file">
+            <input type="file" id="cloth-file" accept=".stl,.obj,.3mf" />
+            <span><b>Choose a model to wrap</b> or drop it on the view<br /><span class="muted">leave empty to make a plain shirt</span></span>
           </label>
-          <label>Depth below the neck <input type="number" id="cloth-neckline-depth" step="1" value="14" /> mm</label>
-          <label>Width <output id="cloth-neckline-width-out">45</output>°
-            <input type="range" id="cloth-neckline-width" min="10" max="120" step="5" value="45" />
-          </label>
-          <label>Collar height above the neck <input type="number" id="cloth-collar-height" step="0.5" value="0" /> mm</label>
-          <label>Turn the front <output id="cloth-front-out">0</output>° (0 points at the head)
-            <input type="range" id="cloth-front" min="-180" max="180" step="5" value="0" />
-          </label>
-          <label>Lean toward the neck <output id="cloth-lean-out">1</output> (0 = straight up from the body's centre, 1 = collar centred on the neck)
-            <input type="range" id="cloth-lean" min="0" max="1" step="0.1" value="1" />
-          </label>
-        </details>
-        <details>
-          <summary>Fabric and details</summary>
-          <label>Fabric
-            <select id="cloth-fabric">
-              <option value="plain">Plain</option>
-              <option value="ribbed">Ribbed knit</option>
-              <option value="puffer">Puffer (quilted rows)</option>
-            </select>
-          </label>
-          <label>Depth <input type="number" id="cloth-fabric-depth" step="0.1" value="0.4" /> mm, ribs around / row height <input type="number" id="cloth-fabric-pitch" step="1" value="48" /></label>
-          <label>Buttons <input type="number" id="cloth-buttons" step="1" min="0" value="0" />, diameter <input type="number" id="cloth-button-dia" step="0.5" value="3" /> mm</label>
-          <label class="check"><input type="checkbox" id="cloth-placket" /> Placket strip down the front</label>
-          <label>Ribbed hem band <input type="number" id="cloth-hem-band" step="1" min="0" value="0" /> mm</label>
-          <label>Stripes every <input type="number" id="cloth-stripes" step="1" min="0" value="0" /> mm (0 = none; painted in the second palette colour)</label>
-          <label>Smoothing <input type="number" id="cloth-smooth" step="1" min="0" max="6" value="2" /></label>
-        </details>
-        <details>
-          <summary>Split in two with magnets</summary>
-          <label>Split
-            <select id="cloth-split">
-              <option value="none">No, one piece that slides on</option>
-              <option value="sides">Left and right halves (seams at the front and back)</option>
-              <option value="front-back">Front and back halves (seams at the sides)</option>
-            </select>
-          </label>
-          <label class="check"><input type="checkbox" id="cloth-form-fit" /> Form fit: hug the chest and under the tail (the halves clip on, so undercuts are fine)</label>
-          <label>Magnets per seam <input type="number" id="cloth-split-magnets" step="1" min="0" value="3" />, discs <input type="number" id="cloth-split-magnet-dia" step="0.5" value="3" /> × <input type="number" id="cloth-split-magnet-thick" step="0.5" value="1" /> mm</label>
-          <p class="muted small">Pockets face each other across the seam, with 0.3 mm of play on the diameter. Where the wall is too thin for the magnet, a small round pad is added on the outside. Export gives one STL per half.</p>
-        </details>
-        <details id="wrap-details">
-          <summary>Wrapping a loaded model</summary>
-          <p class="muted small">The loaded model is shown where the wrap will put it (scaled and leaned, before bending to the body). Line it up, then wrap. If it imports facing the wrong way, turn it 180°.</p>
-          <label>Turn the model <output id="wrap-turn-out">0</output>°
-            <input type="range" id="wrap-turn" min="-180" max="180" step="5" value="0" />
-          </label>
-          <label>Shift its axis x <input type="number" id="wrap-dx" step="0.5" value="0" /> y <input type="number" id="wrap-dy" step="0.5" value="0" /> mm (in the model's own frame)</label>
-          <label>Use the model from <input type="number" id="wrap-band-lo" step="1" min="0" value="0" /> to <input type="number" id="wrap-band-hi" step="1" min="0" value="" placeholder="top" /> mm above its bottom; the rest is cut away</label>
-          <label>Crop its sides: left <input type="number" id="wrap-crop-l" step="1" min="0" value="0" /> right <input type="number" id="wrap-crop-r" step="1" min="0" value="0" /> front <input type="number" id="wrap-crop-f" step="1" min="0" value="0" /> back <input type="number" id="wrap-crop-b" step="1" min="0" value="0" /> mm</label>
-          <label>Keep the top <input type="number" id="cloth-keep-top" step="1" min="0" value="30" /> mm of the model in proportion (collar, hood); the rest stretches to the hem</label>
-          <label>Liner <input type="number" id="cloth-liner" step="0.1" min="0" value="0" /> mm: a smooth layer between the body and the model, for thin or noisy models (moves the model out by as much)</label>
-          <label>Smooth the model <input type="number" id="cloth-smooth-model" step="1" min="0" max="10" value="0" /> passes before stretching: removes fine surface texture (knit, noise), which stands out once a tall model is squashed onto the body</label>
-          <p class="muted small">A closed bottom (pen pots) is cut off automatically. Pen-pot shirts, hoodies and jackets work well; sleeves come along as bumps.</p>
-        </details>
-        <div class="row">
-          <button id="make-shirt" class="primary">Make shirt</button>
-          <button id="wrap-garment" disabled title="Load a garment model on the Accessory tab first">Wrap loaded model</button>
+          <p id="cloth-model" class="small muted">No model loaded; Make shirt needs none.</p>
+          <div class="row"><button id="clear-cloth" disabled title="Nothing to clear">Clear model and garment</button></div>
         </div>
-        <p id="cloth-result" class="small"></p>
-        <div class="row">
-          <button id="export-cloth" disabled>Export STL</button>
-        </div>
-        <p class="muted small">Paint it on the Paint tab and export a 3MF there. Wrapping takes the model loaded on the Accessory tab (hem at its bottom), stretches it over the body and hollows it.</p>
-      </section>
 
-      <section id="tab-hole" class="tab hidden">
-        <p class="small muted">Click the goose to pick a spot. The hole follows the surface normal there.</p>
-        <p id="pick" class="small">No spot picked.</p>
-        <label>Name <input type="text" id="hole-name" value="new_point" /></label>
-        <label>Magnet diameter <input type="number" id="hole-dia" step="0.1" value="6" /> mm</label>
-        <label>Magnet thickness <input type="number" id="hole-thick" step="0.1" value="3" /> mm</label>
-        <label>Mode
-          <select id="hole-mode">
-            <option value="open">Open (press fit)</option>
-            <option value="embedded">Embedded (pause print)</option>
-          </select>
-        </label>
-        <label id="skin-row" class="hidden">Skin over the magnet <input type="number" id="hole-skin" step="0.1" value="1" /> mm</label>
-        <div class="row">
-          <button id="cut-hole" class="primary" disabled>Cut hole</button>
-        </div>
-        <p id="hole-result" class="small"></p>
-        <div class="row">
-          <button id="export-goose">Export goose STL</button>
-          <button id="export-profile">Profile JSON</button>
-        </div>
-      </section>
-
-      <section id="tab-paint" class="tab hidden">
-        <p class="small muted">Left-drag paints the fitted accessory; right-drag orbits. Refine first for finer edges.</p>
-        <div id="palette"></div>
-        <div class="row">
-          <button id="palette-add">Add colour</button>
-        </div>
-        <label>Brush radius <output id="brush-out">3.0</output> mm
-          <input type="range" id="brush" min="0.5" max="15" step="0.5" value="3" />
-        </label>
-        <label>Refine: split edges longer than <input type="number" id="refine-len" step="0.25" value="1" /> mm</label>
-        <div class="row">
-          <button id="refine">Refine mesh</button>
-          <button id="fill-all">Fill all</button>
-          <button id="undo">Undo</button>
-        </div>
-        <p id="paint-info" class="small muted"></p>
-        <label class="check"><input type="checkbox" id="paint-focus" /> Hide the goose and frame the part (focus on painting)</label>
-        <div class="row">
-          <button id="export-3mf" class="primary">Export 3MF</button>
-          <button id="export-fitted-2">Export STL</button>
-        </div>
-        <details>
-          <summary>Split by colour</summary>
-          <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one with the most faces).</p>
-          <label>Skin depth <input type="number" id="split-depth" step="0.2" min="0.4" value="1.2" /> mm</label>
-          <div class="row">
-            <button id="export-split">Export 3MF with one part per colour</button>
+        <div class="step">
+          <h2><span class="n">2</span>Shape</h2>
+          <p class="small muted">The two rings on the goose show the hem and the neck.</p>
+          <div class="slider">
+            <div class="slider-head"><span>Hem height</span><span class="val"><input type="number" id="cloth-hem-num" step="1" min="10" max="150" /><span class="unit">mm</span></span></div>
+            <input type="range" id="cloth-hem" min="10" max="150" step="1" value="46" />
           </div>
-          <p id="split-info" class="small muted"></p>
-        </details>
+          <div class="slider">
+            <div class="slider-head"><span>Neck height</span><span class="val"><input type="number" id="cloth-neck-num" step="1" min="20" max="175" /><span class="unit">mm</span></span></div>
+            <input type="range" id="cloth-neck" min="20" max="175" step="1" value="108" />
+          </div>
+          <div class="field"><span>Wall thickness</span><span class="val"><input type="number" id="cloth-thick" step="0.1" value="1.6" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Clearance to the body</span><span class="val"><input type="number" id="cloth-clear" step="0.05" value="0.4" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Collar</span>
+            <select id="cloth-collar">
+              <option value="tilt">Opens at the front; goes on tilted, beak first</option>
+              <option value="drop">Clears head and beak; drops straight on</option>
+            </select>
+          </div>
+          <div class="field"><span>Extra gap at the neck</span><span class="val"><input type="number" id="cloth-gap" step="0.5" value="1" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Spread the collar</span><span class="val"><input type="number" id="cloth-spread" step="0.5" min="0" value="0" /><span class="unit">mm out</span><input type="number" id="cloth-spread-height" step="1" min="1" value="15" /><span class="unit">mm high</span></span></div>
+          <details>
+            <summary>Neckline and collar</summary>
+            <div class="field"><span>Neckline</span>
+              <select id="cloth-neckline">
+                <option value="v">V</option>
+                <option value="scoop">Scoop (round)</option>
+                <option value="crew">Crew (none)</option>
+              </select>
+            </div>
+            <div class="field"><span>Depth below the neck</span><span class="val"><input type="number" id="cloth-neckline-depth" step="1" value="14" /><span class="unit">mm</span></span></div>
+            <div class="slider">
+              <div class="slider-head"><span>Width</span><span class="val"><input type="number" id="cloth-neckline-width-num" step="5" min="10" max="120" /><span class="unit">°</span></span></div>
+              <input type="range" id="cloth-neckline-width" min="10" max="120" step="5" value="45" />
+            </div>
+            <div class="field"><span>Collar height above the neck</span><span class="val"><input type="number" id="cloth-collar-height" step="0.5" value="0" /><span class="unit">mm</span></span></div>
+            <div class="slider">
+              <div class="slider-head"><span>Turn the front</span><span class="val"><input type="number" id="cloth-front-num" step="5" min="-180" max="180" /><span class="unit">°</span></span></div>
+              <input type="range" id="cloth-front" min="-180" max="180" step="5" value="0" />
+            </div>
+            <p class="small muted">0 points the front at the head.</p>
+            <div class="slider">
+              <div class="slider-head"><span>Lean toward the neck</span><span class="val"><input type="number" id="cloth-lean-num" step="0.1" min="0" max="1" /></span></div>
+              <input type="range" id="cloth-lean" min="0" max="1" step="0.1" value="1" />
+            </div>
+            <p class="small muted">0 is straight up from the body's centre, 1 centres the collar on the neck.</p>
+          </details>
+          <details>
+            <summary>Fabric and details</summary>
+            <div class="field"><span>Fabric</span>
+              <select id="cloth-fabric">
+                <option value="plain">Plain</option>
+                <option value="ribbed">Ribbed knit</option>
+                <option value="puffer">Puffer (quilted rows)</option>
+              </select>
+            </div>
+            <div class="field"><span>Depth</span><span class="val"><input type="number" id="cloth-fabric-depth" step="0.1" value="0.4" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Ribs around / row height</span><span class="val"><input type="number" id="cloth-fabric-pitch" step="1" value="48" /></span></div>
+            <div class="field"><span>Buttons</span><span class="val"><input type="number" id="cloth-buttons" step="1" min="0" value="0" /><span class="unit">×</span><input type="number" id="cloth-button-dia" step="0.5" value="3" /><span class="unit">mm</span></span></div>
+            <label class="check"><input type="checkbox" id="cloth-placket" /> Placket strip down the front</label>
+            <div class="field"><span>Ribbed hem band</span><span class="val"><input type="number" id="cloth-hem-band" step="1" min="0" value="0" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Stripes every</span><span class="val"><input type="number" id="cloth-stripes" step="1" min="0" value="0" /><span class="unit">mm</span></span></div>
+            <p class="small muted">0 is none. Stripes are painted in the second palette colour.</p>
+            <div class="field"><span>Smoothing</span><span class="val"><input type="number" id="cloth-smooth" step="1" min="0" max="6" value="2" /></span></div>
+          </details>
+          <details>
+            <summary>Split in two with magnets</summary>
+            <div class="field"><span>Split</span>
+              <select id="cloth-split">
+                <option value="none">No, one piece that slides on</option>
+                <option value="sides">Left and right halves (seams at the front and back)</option>
+                <option value="front-back">Front and back halves (seams at the sides)</option>
+              </select>
+            </div>
+            <label class="check"><input type="checkbox" id="cloth-form-fit" /> Form fit: hug the chest and under the tail (the halves clip on, so undercuts are fine)</label>
+            <div class="field"><span>Magnets per seam</span><span class="val"><input type="number" id="cloth-split-magnets" step="1" min="0" value="3" /></span></div>
+            <div class="field"><span>Discs</span><span class="val"><input type="number" id="cloth-split-magnet-dia" step="0.5" value="3" /><span class="unit">×</span><input type="number" id="cloth-split-magnet-thick" step="0.5" value="1" /><span class="unit">mm</span></span></div>
+            <p class="muted small">Pockets face each other across the seam, with 0.3 mm of play on the diameter. Where the wall is too thin for the magnet, a small round pad is added on the outside. Export gives one STL per half.</p>
+          </details>
+          <details id="wrap-details">
+            <summary>Wrapping a loaded model</summary>
+            <p class="muted small">The loaded model is shown where the wrap will put it (scaled and leaned, before bending to the body). Line it up, then wrap. If it imports facing the wrong way, turn it 180°.</p>
+            <div class="slider">
+              <div class="slider-head"><span>Turn the model</span><span class="val"><input type="number" id="wrap-turn-num" step="5" min="-180" max="180" /><span class="unit">°</span></span></div>
+              <input type="range" id="wrap-turn" min="-180" max="180" step="5" value="0" />
+            </div>
+            <div class="field"><span>Shift its axis</span><span class="val"><span class="unit">x</span><input type="number" id="wrap-dx" step="0.5" value="0" /><span class="unit">y</span><input type="number" id="wrap-dy" step="0.5" value="0" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Use the model from</span><span class="val"><input type="number" id="wrap-band-lo" step="1" min="0" value="0" /><span class="unit">to</span><input type="number" id="wrap-band-hi" step="1" min="0" value="" placeholder="top" /><span class="unit">mm up</span></span></div>
+            <p class="small muted">Measured above its bottom; the rest is cut away.</p>
+            <div class="field"><span>Crop its sides</span><span class="val"><span class="unit">L</span><input type="number" id="wrap-crop-l" step="1" min="0" value="0" /><span class="unit">R</span><input type="number" id="wrap-crop-r" step="1" min="0" value="0" /><span class="unit">F</span><input type="number" id="wrap-crop-f" step="1" min="0" value="0" /><span class="unit">B</span><input type="number" id="wrap-crop-b" step="1" min="0" value="0" /></span></div>
+            <div class="field"><span>Keep the top in proportion</span><span class="val"><input type="number" id="cloth-keep-top" step="1" min="0" value="30" /><span class="unit">mm</span></span></div>
+            <p class="small muted">Collar and hood keep their shape; the rest stretches to the hem.</p>
+            <div class="field"><span>Liner</span><span class="val"><input type="number" id="cloth-liner" step="0.1" min="0" value="0" /><span class="unit">mm</span></span></div>
+            <p class="small muted">A smooth layer between the body and the model, for thin or noisy models (moves the model out by as much).</p>
+            <div class="field"><span>Smooth the model</span><span class="val"><input type="number" id="cloth-smooth-model" step="1" min="0" max="10" value="0" /><span class="unit">passes</span></span></div>
+            <p class="small muted">Removes fine surface texture (knit, noise), which stands out once a tall model is squashed onto the body. A closed bottom (pen pots) is cut off automatically.</p>
+          </details>
+        </div>
+
+        <div class="step">
+          <h2><span class="n">3</span>Make</h2>
+          <div class="actions">
+            <button id="make-shirt" class="primary">Make shirt</button>
+            <button id="wrap-garment" disabled title="Load a garment model first">Wrap loaded model</button>
+          </div>
+          <p id="cloth-result" class="small"></p>
+          <div class="row">
+            <button id="export-cloth" disabled>Export STL</button>
+          </div>
+          <p class="muted small">Paint it on the Paint tab and export a 3MF there.</p>
+        </div>
+      </section>
+
+      <!-- ============ Paint ============ -->
+      <section id="tab-paint" class="tab hidden">
+        <div class="step">
+          <h2>Colours</h2>
+          <div id="palette"></div>
+          <div class="row"><button id="palette-add">Add colour</button></div>
+          <p class="small muted">The highlighted colour is the one you paint with. Names go to the 3MF as filament names.</p>
+        </div>
+
+        <div class="step">
+          <h2>Tool</h2>
+          <div class="toolbar" id="paint-tools">
+            <button data-tool="brush" class="active" title="Drag to paint">Brush</button>
+            <button data-tool="bucket" title="Click a region to fill it">Bucket</button>
+            <button data-tool="corners" title="Click corners, fill inside">Corners</button>
+            <button data-tool="text" title="Stamp text">Text</button>
+          </div>
+          <div id="tool-brush" class="tool">
+            <div class="slider">
+              <div class="slider-head"><span>Brush radius</span><span class="val"><input type="number" id="brush-num" step="0.5" min="0.5" max="15" /><span class="unit">mm</span></span></div>
+              <input type="range" id="brush" min="0.5" max="15" step="0.5" value="3" />
+            </div>
+            <p class="small muted">Left-drag paints, right-drag orbits.</p>
+          </div>
+          <div id="tool-bucket" class="tool hidden">
+            <div class="slider">
+              <div class="slider-head"><span>Stop at edges sharper than</span><span class="val"><input type="number" id="bucket-angle-num" step="5" min="5" max="180" /><span class="unit">°</span></span></div>
+              <input type="range" id="bucket-angle" min="5" max="180" step="5" value="40" />
+            </div>
+            <p class="small muted">Click the part: the fill spreads from there until it meets another colour or a crease. 180° stops only at colours.</p>
+          </div>
+          <div id="tool-corners" class="tool hidden">
+            <p class="small muted">Click the corners of an area on the part; double-click or press Fill to colour everything you can see inside them. Esc or Clear starts over.</p>
+            <div class="row">
+              <button id="corners-apply" disabled>Fill inside</button>
+              <button id="corners-clear">Clear corners</button>
+            </div>
+            <p id="corners-info" class="small muted">No corners yet.</p>
+          </div>
+          <div id="tool-text" class="tool hidden">
+            <div class="field"><span>Text</span><input type="text" id="text-value" value="GUS" /></div>
+            <div class="slider">
+              <div class="slider-head"><span>Letter height</span><span class="val"><input type="number" id="text-size-num" step="0.5" min="1" max="60" /><span class="unit">mm</span></span></div>
+              <input type="range" id="text-size" min="1" max="60" step="0.5" value="8" />
+            </div>
+            <div class="slider">
+              <div class="slider-head"><span>Angle</span><span class="val"><input type="number" id="text-angle-num" step="5" min="-180" max="180" /><span class="unit">°</span></span></div>
+              <input type="range" id="text-angle" min="-180" max="180" step="5" value="0" />
+            </div>
+            <div class="field"><span>Font</span>
+              <select id="text-font">
+                <option value="bold 1px sans-serif">Sans, bold</option>
+                <option value="1px sans-serif">Sans</option>
+                <option value="bold 1px serif">Serif, bold</option>
+                <option value="1px serif">Serif</option>
+                <option value="bold 1px monospace">Mono, bold</option>
+              </select>
+            </div>
+            <p class="small muted">Move over the part to preview, click to stamp as seen from the camera. Refine the mesh first so the letters have faces to land on: about 0.5 mm for 8 mm letters.</p>
+          </div>
+          <div class="row">
+            <button id="undo">Undo</button>
+            <button id="fill-all">Fill all</button>
+          </div>
+        </div>
+
+        <div class="step">
+          <h2>Mesh and view</h2>
+          <div class="field"><span>Refine: split edges longer than</span><span class="val"><input type="number" id="refine-len" step="0.25" value="1" /><span class="unit">mm</span></span></div>
+          <div class="row"><button id="refine">Refine mesh</button></div>
+          <p id="paint-info" class="small muted"></p>
+          <label class="check"><input type="checkbox" id="paint-focus" /> Hide the goose and frame the part</label>
+        </div>
+
+        <div class="step">
+          <h2>Export</h2>
+          <div class="actions">
+            <button id="export-3mf" class="primary">Export 3MF</button>
+            <button id="export-fitted-2">Export STL</button>
+          </div>
+          <details id="split-details">
+            <summary>Split by colour</summary>
+            <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one with the most faces).</p>
+            <div class="field"><span>Skin depth</span><span class="val"><input type="number" id="split-depth" step="0.2" min="0.4" value="1.2" /><span class="unit">mm</span></span></div>
+            <div class="row">
+              <button id="export-split">Export 3MF with one part per colour</button>
+            </div>
+            <p id="split-info" class="small muted"></p>
+          </details>
+        </div>
+      </section>
+
+      <!-- ============ Magnet hole ============ -->
+      <section id="tab-hole" class="tab hidden">
+        <div class="step">
+          <h2><span class="n">1</span>Pick a spot for a magnet hole</h2>
+          <p class="small muted">Click the goose. The hole follows the surface normal there.</p>
+          <p id="pick" class="small">No spot picked.</p>
+        </div>
+        <div class="step">
+          <h2><span class="n">2</span>Magnet</h2>
+          <div class="field"><span>Name</span><input type="text" id="hole-name" value="new_point" /></div>
+          <div class="field"><span>Magnet diameter</span><span class="val"><input type="number" id="hole-dia" step="0.1" value="6" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Magnet thickness</span><span class="val"><input type="number" id="hole-thick" step="0.1" value="3" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Mode</span>
+            <select id="hole-mode">
+              <option value="open">Open (press fit)</option>
+              <option value="embedded">Embedded (pause print)</option>
+            </select>
+          </div>
+          <div class="field hidden" id="skin-row"><span>Skin over the magnet</span><span class="val"><input type="number" id="hole-skin" step="0.1" value="1" /><span class="unit">mm</span></span></div>
+          <div class="actions">
+            <button id="cut-hole" class="primary" disabled>Cut hole</button>
+          </div>
+          <p id="hole-result" class="small"></p>
+        </div>
+        <div class="step">
+          <h2><span class="n">3</span>Export the goose</h2>
+          <div class="row">
+            <button id="export-goose">Goose STL</button>
+            <button id="export-profile">Profile JSON</button>
+          </div>
+        </div>
       </section>
 
       <section class="points">
@@ -277,7 +403,9 @@
         <div id="goose-colours"></div>
       </section>
     </aside>
-    <main id="view"></main>
+    <main id="view">
+      <canvas id="overlay"></canvas>
+    </main>
   </div>
   <script type="module" src="/src/web/main.ts"></script>
 </body>

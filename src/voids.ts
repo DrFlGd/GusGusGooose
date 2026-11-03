@@ -36,7 +36,24 @@ const MIN_WALL_FACES = 8;
 
 type V3 = [number, number, number];
 
-export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
+/** A round channel open at both ends (a pin hole through a wall), found by `findVoids`. */
+export interface Tube {
+  /** a point on the axis, between the two mouths */
+  center: [number, number, number];
+  axis: [number, number, number];
+  radius: number;
+  /** the two mouths, where the channel meets the surface */
+  ends: [[number, number, number], [number, number, number]];
+  length: number;
+  wallFaces: number;
+}
+
+/**
+ * Finds the magnet voids. Round channels open at both ends are not voids; when
+ * `tubes` is given they are collected there instead (the eye pin hole through
+ * the goose's head is one).
+ */
+export function findVoids(mesh: IndexedMesh, tubes?: Tube[]): MagnetVoid[] {
   const { positions: P, triangles: T } = mesh;
   const nTri = T.length / 3;
   const normals = new Float64Array(nTri * 3);
@@ -162,7 +179,11 @@ export function findVoids(mesh: IndexedMesh): MagnetVoid[] {
       }
     }
     const disc = Math.PI * rMean * rMean;
-    if (Math.max(areaLow, areaHigh) < disc * 0.3) { reject(faces, `no floor (areas ${areaLow.toFixed(1)}/${areaHigh.toFixed(1)} of ${disc.toFixed(1)}), r ${rMean.toFixed(2)} depth ${(tMax - tMin).toFixed(2)} at ${c0.map((v) => v.toFixed(1))}`); continue; } // open tube, not a pocket
+    if (Math.max(areaLow, areaHigh) < disc * 0.3) { // open tube, not a pocket
+      reject(faces, `no floor (areas ${areaLow.toFixed(1)}/${areaHigh.toFixed(1)} of ${disc.toFixed(1)}), r ${rMean.toFixed(2)} depth ${(tMax - tMin).toFixed(2)} at ${c0.map((v) => v.toFixed(1))} axis ${axis.map((v) => v.toFixed(2))}`);
+      if (areaLow < disc * 0.3 && areaHigh < disc * 0.3) tubes?.push({ center: c0, axis, radius: rMean, ends: [add(c0, scale(axis, tMin)), add(c0, scale(axis, tMax))], length: tMax - tMin, wallFaces: faces.length });
+      continue;
+    }
     // orient axis so it points from the floor toward the mouth
     if (debug) console.log(`  candidate r ${rMean.toFixed(2)} floor areas low ${areaLow.toFixed(1)} high ${areaHigh.toFixed(1)} tMin ${tMin.toFixed(2)} tMax ${tMax.toFixed(2)} axis ${axis.map((v) => v.toFixed(2))}`);
     const out = areaLow > areaHigh ? axis : scale(axis, -1);
