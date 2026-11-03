@@ -2,3 +2,4 @@ node_modules/
 *.fitted.stl
 dist/
 smoke-out/
+accessories/out/
