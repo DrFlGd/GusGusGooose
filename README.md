@@ -16,7 +16,10 @@ goose, a width to scale it to, a plug of solid material for hollow models),
 place it on a point with sink, spin and slide controls, Fit with one click
 and export. The Clothing tab makes a shirt, sweater or coat that follows the
 body between a hem and a neck height and slips on over the head (no
-magnets), or wraps a downloaded garment over the body and hollows it. The
+magnets), with a V, scoop or crew neckline, a collar, ribbed or quilted
+fabric, buttons, a placket, a hem band and stripes; or it wraps a
+downloaded garment (pen-pot shirts and jackets work well) over the body,
+keeping its collar in proportion, and hollows it. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
 pause height reported, and exports the holed goose. The Paint tab (after
 a fit or a garment) brushes faces with a palette of your filament colours,

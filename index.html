@@ -120,7 +120,45 @@
           </select>
         </label>
         <label>Extra gap at the neck <input type="number" id="cloth-gap" step="0.5" value="1" /> mm</label>
-        <label>Smoothing <input type="number" id="cloth-smooth" step="1" min="0" max="6" value="2" /></label>
+        <details open>
+          <summary>Neckline and collar</summary>
+          <label>Neckline
+            <select id="cloth-neckline">
+              <option value="v">V</option>
+              <option value="scoop">Scoop (round)</option>
+              <option value="crew">Crew (none)</option>
+            </select>
+          </label>
+          <label>Depth below the neck <input type="number" id="cloth-neckline-depth" step="1" value="14" /> mm</label>
+          <label>Width <output id="cloth-neckline-width-out">45</output>°
+            <input type="range" id="cloth-neckline-width" min="10" max="120" step="5" value="45" />
+          </label>
+          <label>Collar height above the neck <input type="number" id="cloth-collar-height" step="0.5" value="0" /> mm</label>
+          <label>Turn the front <output id="cloth-front-out">0</output>° (0 points at the head)
+            <input type="range" id="cloth-front" min="-90" max="90" step="5" value="0" />
+          </label>
+        </details>
+        <details>
+          <summary>Fabric and details</summary>
+          <label>Fabric
+            <select id="cloth-fabric">
+              <option value="plain">Plain</option>
+              <option value="ribbed">Ribbed knit</option>
+              <option value="puffer">Puffer (quilted rows)</option>
+            </select>
+          </label>
+          <label>Depth <input type="number" id="cloth-fabric-depth" step="0.1" value="0.4" /> mm, ribs around / row height <input type="number" id="cloth-fabric-pitch" step="1" value="48" /></label>
+          <label>Buttons <input type="number" id="cloth-buttons" step="1" min="0" value="0" />, diameter <input type="number" id="cloth-button-dia" step="0.5" value="3" /> mm</label>
+          <label class="check"><input type="checkbox" id="cloth-placket" /> Placket strip down the front</label>
+          <label>Ribbed hem band <input type="number" id="cloth-hem-band" step="1" min="0" value="0" /> mm</label>
+          <label>Stripes every <input type="number" id="cloth-stripes" step="1" min="0" value="0" /> mm (0 = none; painted in the second palette colour)</label>
+          <label>Smoothing <input type="number" id="cloth-smooth" step="1" min="0" max="6" value="2" /></label>
+        </details>
+        <details>
+          <summary>Wrapping a loaded model</summary>
+          <label>Keep the top <input type="number" id="cloth-keep-top" step="1" min="0" value="30" /> mm of the model in proportion (collar, hood); the rest stretches to the hem</label>
+          <p class="muted small">A closed bottom (pen pots) is cut off automatically. Pen-pot shirts, hoodies and jackets work well; sleeves come along as bumps.</p>
+        </details>
         <div class="row">
           <button id="make-shirt" class="primary">Make shirt</button>
           <button id="wrap-garment" disabled title="Load a garment model on the Accessory tab first">Wrap loaded model</button>

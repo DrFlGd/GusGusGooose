@@ -133,7 +133,17 @@ stands about 25 mm off the chest. A downloaded garment is handled the same
 way: its vertices keep their height fraction, angle and distance from the
 garment's own inner surface and are re-seated on the goose's profile, then
 the drop-on solid is subtracted so it is hollow and slides over the head.
-Ribs, buttons and collars survive the stretch; sleeves do not map well yet.
+Ribs, buttons and collars survive the stretch; sleeves come along as bumps.
+Closed bottoms (pen-pot garments) are cut off, and the top of the model can
+keep its proportions while the rest stretches to the hem.
+
+The generated shirt is the base design with options layered on it, as
+Jerred suggested on 2026-11-03: neckline (V, scoop or crew, depth and
+width, at the front, which is found automatically from where the head is),
+a collar tube, fabric (ribbed knit or quilted puffer rows), buttons and a
+placket, a ribbed hem band, and painted stripes. Each is a small bump on
+the garment's radial profile or a cut, so they are cheap and never break
+the drop-on shape.
 
 ## Still needed from Jerred
 

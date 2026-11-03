@@ -8,7 +8,7 @@ import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
 import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
 import { loadModel } from '../load-model.ts';
 import { DEFAULT_PREPARE, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
-import { contourGarment, wrapGarment, type GarmentOptions } from '../clothing.ts';
+import { contourGarment, wrapGarment, type GarmentOptions, type WrapOptions } from '../clothing.ts';
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
@@ -564,17 +564,21 @@ function ring(color: number): THREE.LineLoop {
 }
 const hemRing = ring(0xf2b84b), neckRing = ring(0x6fb1ff);
 guides.add(hemRing, neckRing);
-function garmentOptions(): Partial<GarmentOptions> {
+function garmentOptions(): Partial<WrapOptions> {
+  const num = (id: string) => Number($<HTMLInputElement>(id).value);
   return {
-    hem: Number($<HTMLInputElement>('cloth-hem').value),
-    neck: Number($<HTMLInputElement>('cloth-neck').value),
-    thickness: Number($<HTMLInputElement>('cloth-thick').value),
-    clearance: Number($<HTMLInputElement>('cloth-clear').value),
-    collar: $<HTMLSelectElement>('cloth-collar').value as GarmentOptions['collar'],
-    collarGap: Number($<HTMLInputElement>('cloth-gap').value),
-    smooth: Number($<HTMLInputElement>('cloth-smooth').value),
+    hem: num('cloth-hem'), neck: num('cloth-neck'), thickness: num('cloth-thick'), clearance: num('cloth-clear'),
+    collar: $<HTMLSelectElement>('cloth-collar').value as GarmentOptions['collar'], collarGap: num('cloth-gap'), smooth: num('cloth-smooth'),
+    neckline: $<HTMLSelectElement>('cloth-neckline').value as GarmentOptions['neckline'], necklineDepth: num('cloth-neckline-depth'), necklineWidth: num('cloth-neckline-width'),
+    collarHeight: num('cloth-collar-height'), frontOffset: num('cloth-front'),
+    fabric: $<HTMLSelectElement>('cloth-fabric').value as GarmentOptions['fabric'], fabricDepth: num('cloth-fabric-depth'), fabricPitch: num('cloth-fabric-pitch'),
+    buttons: num('cloth-buttons'), buttonDiameter: num('cloth-button-dia'), placket: $<HTMLInputElement>('cloth-placket').checked,
+    hemBand: num('cloth-hem-band'), stripes: num('cloth-stripes'),
+    keepTop: num('cloth-keep-top'),
   };
 }
+$<HTMLInputElement>('cloth-neckline-width').oninput = () => { $('cloth-neckline-width-out').textContent = $<HTMLInputElement>('cloth-neckline-width').value; };
+$<HTMLInputElement>('cloth-front').oninput = () => { $('cloth-front-out').textContent = $<HTMLInputElement>('cloth-front').value; };
 function updateGuides() {
   const o = garmentOptions();
   $('cloth-hem-out').textContent = String(o.hem);
@@ -599,6 +603,7 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
     const g = kind === 'shirt' ? await contourGarment(gooseManifold, o) : await wrapGarment(accessoryManifold!, gooseManifold, o);
     clearFitted();
     showFitted(g.mesh);
+    if (g.faceMaterial && paint) { paint.faceMaterial.set(g.faceMaterial); paint.recolor(); }
     garmentName = kind === 'shirt' ? `shirt.${o.hem}-${o.neck}` : `${rawName.replace(/\.[^.]+$/, '')}.wrapped`;
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('cloth-result').textContent = `Done in ${secs} s: ${g.solid.volume().toFixed(0)} mm³, ${(g.mesh.triangles.length / 3).toLocaleString()} faces. ${g.warnings.join('; ')}`;

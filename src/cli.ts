@@ -4,8 +4,10 @@
 //   node src/cli.ts detect goose/goose.stl [--out goose/profile.json]
 //   node src/cli.ts fit --accessory hat.stl --point head [--sink 2] [--spin 0] [--out fitted.stl]
 //   node src/cli.ts hole --model goose/goose.stl --at x,y,z --name head --magnet-dia 6 --magnet-thick 3 [--embedded --skin 1] [--out goose/goose.holed.stl]
-//   node src/cli.ts shirt [--hem 46] [--neck 108] [--thickness 1.6] [--clearance 0.4] [--collar tilt|drop] [--collar-gap 1] [--out shirt.stl]
-//   node src/cli.ts wrap --garment sweater.stl [--mode auto|shell|solid] [shirt options] [--out sweater.fitted.stl]
+//   node src/cli.ts shirt [--hem 46] [--neck 108] [--thickness 1.6] [--clearance 0.4] [--collar tilt|drop] [--collar-gap 1]
+//                         [--neckline v|scoop|crew --neckline-depth 14 --neckline-width 45] [--collar-height 0] [--fabric plain|ribbed|puffer --fabric-depth 0.4 --fabric-pitch 48]
+//                         [--buttons 0 --button-dia 3 --placket] [--hem-band 0] [--stripes 0] [--out shirt.stl]
+//   node src/cli.ts wrap --garment sweater.3mf [--mode auto|shell|solid] [--keep-top 30] [--floor auto|0] [--hem 46 --neck 108 ...] [--out sweater.fitted.stl]
 //
 // `detect` finds the magnet voids in the goose and writes the fit profile.
 // `fit` uses that profile to carve and pocket an accessory.
@@ -116,9 +118,14 @@ async function hole() {
 
 function garmentArgs(): Partial<GarmentOptions> {
   const num = (name: string) => (arg(name) !== undefined ? Number(arg(name)) : undefined);
+  const flag = (name: string) => process.argv.includes(`--${name}`) ? true : undefined;
   const o: Partial<GarmentOptions> = {
     hem: num('hem'), neck: num('neck'), thickness: num('thickness'), clearance: num('clearance'),
     collar: arg('collar') as GarmentOptions['collar'], collarGap: num('collar-gap'), smooth: num('smooth'), dz: num('dz'),
+    neckline: arg('neckline') as GarmentOptions['neckline'], necklineDepth: num('neckline-depth'), necklineWidth: num('neckline-width'),
+    collarHeight: num('collar-height'), front: num('front'), frontOffset: num('front-offset'),
+    fabric: arg('fabric') as GarmentOptions['fabric'], fabricDepth: num('fabric-depth'), fabricPitch: num('fabric-pitch'),
+    buttons: num('buttons'), buttonDiameter: num('button-dia'), placket: flag('placket'), hemBand: num('hem-band'), stripes: num('stripes'),
   };
   for (const k of Object.keys(o) as (keyof GarmentOptions)[]) if (o[k] === undefined) delete o[k];
   return o;
@@ -143,7 +150,7 @@ async function wrap() {
   const goose = await toManifold(readStl(arg('goose', GOOSE)!));
   const { solid: raw } = await loadModel(garmentPath, readFileSync(garmentPath));
   const prepared = await prepareAccessory(raw, { down: (arg('down', '-z') as Side), scale: Number(arg('scale', '1')), centre: 'bbox' });
-  const o = { ...DEFAULT_GARMENT, ...garmentArgs(), mode: (arg('mode', 'auto') as 'auto' | 'shell' | 'solid') };
+  const o = { ...DEFAULT_GARMENT, ...garmentArgs(), mode: (arg('mode', 'auto') as 'auto' | 'shell' | 'solid'), keepTop: Number(arg('keep-top', '0')), floor: arg('floor') === undefined ? 'auto' as const : Number(arg('floor')) };
   const t0 = performance.now();
   const g = await wrapGarment(prepared.solid, goose, o);
   const out = arg('out', garmentPath.replace(/\.(stl|obj|3mf)$/i, '') + '.fitted.stl')!;
