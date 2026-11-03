@@ -4,11 +4,15 @@
 //   node src/cli.ts detect goose/goose.stl [--out goose/profile.json]
 //   node src/cli.ts fit --accessory hat.stl --point head [--sink 2] [--spin 0] [--out fitted.stl]
 //   node src/cli.ts hole --model goose/goose.stl --at x,y,z --name head --magnet-dia 6 --magnet-thick 3 [--embedded --skin 1] [--out goose/goose.holed.stl]
+//   node src/cli.ts shirt [--hem 46] [--neck 108] [--thickness 1.6] [--clearance 0.4] [--collar tilt|drop] [--collar-gap 1] [--out shirt.stl]
+//   node src/cli.ts wrap --garment sweater.stl [--mode auto|shell|solid] [shirt options] [--out sweater.fitted.stl]
 //
 // `detect` finds the magnet voids in the goose and writes the fit profile.
 // `fit` uses that profile to carve and pocket an accessory.
 // `hole` cuts a magnet pocket at a picked spot (open or embedded) and adds
 // the point to the profile.
+// `shirt` builds a garment shell that follows the body between hem and neck.
+// `wrap` stretches a downloaded garment over the body and hollows it.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { readStl, writeStl } from './stl-node.ts';
@@ -16,6 +20,9 @@ import { findVoids, suggestNames } from './voids.ts';
 import { addMagnetHole } from './hole.ts';
 import { fromManifold } from './fit.ts';
 import { DEFAULT_PROFILE, fitAccessory, toManifold, type FitProfile } from './fit.ts';
+import { contourGarment, wrapGarment, DEFAULT_GARMENT, type GarmentOptions } from './clothing.ts';
+import { loadModel } from './load-model.ts';
+import { prepareAccessory, type Side } from './prepare.ts';
 
 const GOOSE = 'goose/goose.stl';
 const PROFILE = 'goose/profile.json';
@@ -107,10 +114,49 @@ async function hole() {
   console.log(`model written to ${out}, point added to ${profilePath}`);
 }
 
+function garmentArgs(): Partial<GarmentOptions> {
+  const num = (name: string) => (arg(name) !== undefined ? Number(arg(name)) : undefined);
+  const o: Partial<GarmentOptions> = {
+    hem: num('hem'), neck: num('neck'), thickness: num('thickness'), clearance: num('clearance'),
+    collar: arg('collar') as GarmentOptions['collar'], collarGap: num('collar-gap'), smooth: num('smooth'), dz: num('dz'),
+  };
+  for (const k of Object.keys(o) as (keyof GarmentOptions)[]) if (o[k] === undefined) delete o[k];
+  return o;
+}
+
+async function shirt() {
+  const goose = await toManifold(readStl(arg('goose', GOOSE)!));
+  const o = { ...DEFAULT_GARMENT, ...garmentArgs() };
+  const t0 = performance.now();
+  const g = await contourGarment(goose, o);
+  const out = arg('out', `shirt.${o.hem}-${o.neck}.stl`)!;
+  writeStl(out, g.mesh);
+  const bb = g.solid.boundingBox();
+  console.log(`shirt from z=${o.hem} to ${o.neck}, ${o.thickness} mm walls, ${o.clearance} mm clearance, collar ${o.collar}: ${g.solid.volume().toFixed(0)} mm³, ${bb.max.map((v, i) => (v - bb.min[i]).toFixed(1)).join(' x ')} mm in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  for (const w of g.warnings) console.log(`  ${w}`);
+  console.log(`written to ${out}`);
+}
+
+async function wrap() {
+  const garmentPath = arg('garment');
+  if (!garmentPath) throw new Error('--garment <file> is required');
+  const goose = await toManifold(readStl(arg('goose', GOOSE)!));
+  const { solid: raw } = await loadModel(garmentPath, readFileSync(garmentPath));
+  const prepared = await prepareAccessory(raw, { down: (arg('down', '-z') as Side), scale: Number(arg('scale', '1')), centre: 'bbox' });
+  const o = { ...DEFAULT_GARMENT, ...garmentArgs(), mode: (arg('mode', 'auto') as 'auto' | 'shell' | 'solid') };
+  const t0 = performance.now();
+  const g = await wrapGarment(prepared.solid, goose, o);
+  const out = arg('out', garmentPath.replace(/\.(stl|obj|3mf)$/i, '') + '.fitted.stl')!;
+  writeStl(out, g.mesh);
+  console.log(`wrapped ${garmentPath} (${g.mode}) onto the goose from z=${o.hem} to ${o.neck}: ${raw.volume().toFixed(0)} → ${g.solid.volume().toFixed(0)} mm³ in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  for (const w of g.warnings) console.log(`  ${w}`);
+  console.log(`written to ${out}`);
+}
+
 const cmd = process.argv[2];
-const run = cmd === 'detect' ? detect : cmd === 'fit' ? fit : cmd === 'hole' ? hole : null;
+const run = cmd === 'detect' ? detect : cmd === 'fit' ? fit : cmd === 'hole' ? hole : cmd === 'shirt' ? shirt : cmd === 'wrap' ? wrap : null;
 if (!run) {
-  console.error('commands: detect, fit, hole');
+  console.error('commands: detect, fit, hole, shirt, wrap');
   process.exit(2);
 }
 run().catch((e) => { console.error(e.message ?? e); process.exit(1); });

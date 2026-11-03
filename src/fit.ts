@@ -81,6 +81,48 @@ export async function toManifold(mesh: IndexedMesh): Promise<ManifoldT> {
   return man;
 }
 
+/**
+ * Like toManifold, but tags each triangle's material as a run so booleans
+ * carry it through: run originalIDs are `firstID + material`, with firstID
+ * from `Manifold.reserveIDs(materialCount)`. Triangles are sorted by material.
+ */
+export async function toManifoldTagged(mesh: IndexedMesh, faceMaterial: Uint8Array, firstID: number): Promise<ManifoldT> {
+  const { Manifold, Mesh } = await manifold();
+  const n = faceMaterial.length;
+  const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => faceMaterial[a] - faceMaterial[b] || a - b);
+  const triVerts = new Uint32Array(n * 3);
+  const runIndex: number[] = [], runOriginalID: number[] = [];
+  let last = -1;
+  order.forEach((t, i) => {
+    triVerts[i * 3] = mesh.triangles[t * 3]; triVerts[i * 3 + 1] = mesh.triangles[t * 3 + 1]; triVerts[i * 3 + 2] = mesh.triangles[t * 3 + 2];
+    if (faceMaterial[t] !== last) { last = faceMaterial[t]; runIndex.push(i * 3); runOriginalID.push(firstID + last); }
+  });
+  const m = new Mesh({ numProp: 3, vertProperties: mesh.positions, triVerts, runIndex: Uint32Array.from(runIndex), runOriginalID: Uint32Array.from(runOriginalID) });
+  m.merge();
+  const man = new Manifold(m);
+  const status = man.status();
+  if (status !== 'NoError') throw new Error(`mesh is not manifold: ${status}`);
+  return man;
+}
+
+/**
+ * Reads a manifold back with one material index per triangle, from the run
+ * originalIDs set by toManifoldTagged. Faces from other sources (cutters,
+ * other inputs) get `fallback`.
+ */
+export function fromManifoldTagged(man: ManifoldT, firstID: number, materialCount: number, fallback = 0): { mesh: IndexedMesh; faceMaterial: Uint8Array } {
+  const m: MeshT = man.getMesh();
+  const mesh = fromManifold(man);
+  const faceMaterial = new Uint8Array(m.numTri).fill(fallback);
+  for (let r = 0; r < m.runOriginalID.length; r++) {
+    const mat = m.runOriginalID[r] - firstID;
+    if (mat < 0 || mat >= materialCount) continue;
+    const end = r + 1 < m.runIndex.length ? m.runIndex[r + 1] : m.triVerts.length;
+    for (let t = m.runIndex[r] / 3; t < end / 3; t++) faceMaterial[t] = mat;
+  }
+  return { mesh, faceMaterial };
+}
+
 export function fromManifold(man: ManifoldT): IndexedMesh {
   const m: MeshT = man.getMesh();
   const positions = new Float32Array(m.numVert * 3);

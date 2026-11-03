@@ -84,6 +84,25 @@ function parseAscii(text: string): Float32Array {
   return Float32Array.from(vals);
 }
 
+/**
+ * Which triangles of `mesh` survive an STL round trip (serializeStl then
+ * parseStl): welding at WELD_DECIMALS drops triangles whose corners merge.
+ * Lets per-triangle data written next to an STL stay aligned with it.
+ */
+export function survivesRoundTrip(mesh: IndexedMesh): boolean[] {
+  const scale = 10 ** WELD_DECIMALS;
+  const key = (v: number) => {
+    const f = Math.fround; // the STL stores float32
+    return `${Math.round(f(mesh.positions[v * 3]) * scale)},${Math.round(f(mesh.positions[v * 3 + 1]) * scale)},${Math.round(f(mesh.positions[v * 3 + 2]) * scale)}`;
+  };
+  const out: boolean[] = [];
+  for (let i = 0; i < mesh.triangles.length; i += 3) {
+    const a = key(mesh.triangles[i]), b = key(mesh.triangles[i + 1]), c = key(mesh.triangles[i + 2]);
+    out.push(a !== b && b !== c && a !== c);
+  }
+  return out;
+}
+
 /** Triangle soup (9 floats per triangle) → indexed mesh with shared vertices. */
 export function weld(soup: Float32Array): IndexedMesh {
   const scale = 10 ** WELD_DECIMALS;

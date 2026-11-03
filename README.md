@@ -9,17 +9,26 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 
 ## App
 
-`npm run dev` opens the browser app (Vite). It loads the goose and its
-magnet points, lets you drop an accessory STL on a point with sink, spin
-and slide controls, fits it with one click and exports the STL. The
+`npm run dev` opens the browser app (Vite). It shows the goose in its
+filament colours with its magnet points. Load a downloaded model (STL, OBJ
+or 3MF, or drop the file on the view), prepare it (which side meets the
+goose, a width to scale it to, a plug of solid material for hollow models),
+place it on a point with sink, spin and slide controls, Fit with one click
+and export. The Clothing tab makes a shirt, sweater or coat that follows the
+body between a hem and a neck height and slips on over the head (no
+magnets), or wraps a downloaded garment over the body and hollows it. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
 pause height reported, and exports the holed goose. The Paint tab (after
-a fit) brushes faces with a palette of your filament colours, with Refine
-to split the mesh for finer edges, Fill all and Undo, and exports a 3MF
-whose colour regions the slicer maps to filaments (STL stays for
-single-colour parts). Everything runs in the page; nothing is uploaded. `npm run smoke` builds it and drives it
-headlessly (fit a puck, cut a hole, screenshots in `smoke-out/`); it needs
-Playwright with Chromium available.
+a fit or a garment) brushes faces with a palette of your filament colours,
+with Refine to split the mesh for finer edges, Fill all and Undo, and
+exports a 3MF whose colour regions the slicer maps to filaments (STL stays
+for single-colour parts). Everything runs in the page; nothing is uploaded.
+`npm run smoke` builds it and drives it headlessly (fit a puck, import a
+3MF, make a shirt, wrap it, cut a hole; screenshots in `smoke-out/`); it
+needs Playwright with Chromium available.
+
+Accessories are downloaded models, never built from primitives; see
+[accessories/README.md](accessories/README.md) for the library layout.
 
 The GitHub Pages workflow deploys the app from `main` once Pages is
 enabled for the repo (Settings → Pages → Source: GitHub Actions).
@@ -37,7 +46,9 @@ straight from those negative parts: head 10.2 dia x 4.2 disc, wings
 10.2 x 10.2 x 4.2 blocks, beak 8 dia x 4.2 disc with its insertion slot.
 All four are embedded (inserted at print pauses), so accessories align to
 the centre of each void's outer face projected to the surface. The eyes are
-printed separately and are not in the model.
+printed separately and are not in the model. `goose/goose-colors.json`
+carries each triangle's filament (orange beak, feet and nose; white body;
+the base disc) from the project file, for the viewer only.
 
 ## Use
 
@@ -61,6 +72,11 @@ npm run fit -- --accessory hat.stl --point head --sink 2 --spin 0 --out hat.fitt
 node src/cli.ts hole --model goose/goose.stl --at 125.6,100.4,183 --name head --magnet-dia 6 --magnet-thick 3 --out goose/goose.holed.stl
 node src/cli.ts hole --model goose/goose.holed.stl --at 140,78,170 --name beak --magnet-dia 6 --magnet-thick 3 --embedded --skin 1 --out goose/goose.holed.stl
 
+# 3. clothing: a shell that follows the body from hem to neck (tilt-on collar, or --collar drop)
+node src/cli.ts shirt --hem 46 --neck 108 --thickness 1.6 --clearance 0.4 --out shirt.stl
+# or stretch a downloaded garment (hem at its bottom) over the body and hollow it
+node src/cli.ts wrap --garment sweater.stl --hem 46 --neck 108 --out sweater.fitted.stl
+
 # magnet size and pocket are adjustable per accessory (defaults mirror the goose void)
 npm run fit -- --accessory hat.stl --point head --magnet-dia 8 --magnet-thick 3 --pocket-radial 0.1 --pocket-axial 0.2
 npm run fit -- --accessory hat.stl --point head --no-pocket
@@ -80,8 +96,12 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
 - `src/hole.ts` magnet-hole tool: snap to surface, cut open or embedded pocket
+- `src/load-model.ts`, `src/obj.ts`, `src/zip-read.ts` read STL, OBJ and 3MF (pure, shared with the app)
+- `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, plug
+- `src/clothing.ts` body profile, contour shirt and garment wrap
+- `src/goose-colors.ts` the goose's per-face filament colours
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)
-- `src/cli.ts` `detect`, `fit` and `hole` commands
+- `src/cli.ts` `detect`, `fit`, `hole`, `shirt` and `wrap` commands
 - `src/web/` the browser app (three.js viewer, panel, same pipeline in Manifold WASM)
 - `scripts/smoke.mjs` headless Playwright run of the built app
 - `test/` end-to-end test on a synthetic goose (sphere with four voids)

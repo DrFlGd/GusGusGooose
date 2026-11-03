@@ -97,7 +97,7 @@ Each phase ends with a print, not a demo: the gate on each phase is what has to 
 | 0. Calibrate | Week 1 | Test pucks per point; pick clearance and polarity | A puck seats at all 4 points |
 | 1. Headless fit | Weeks 1 to 2 | Script: goose + accessory STL + point in, fitted STL out | A refitted accessory prints and seats |
 | 2. Placement UI | Weeks 3 to 4 | Browser viewer, snap to point, gizmos, Fit, export, first paint brush and 3MF export | A new accessory fitted with no code changes |
-| 3. Polish | Week 5 on | Polarity marks, batch fitting, thickness check, repair path, fill and edge-aware paint tools | Jerred's call per feature |
+| 3. Polish | Week 5 on | Import and prepare downloaded models, clothing, coloured goose, polarity marks, batch fitting, thickness check, repair path | Jerred's call per feature |
 
 - **Phase 0, calibrate.** Generate a set of small test pucks (one per magnet point, three clearances each, pocket sizes stepped by 0.1 mm). Jerred prints them and says which seats and grips best. The four points, axes and pocket dimensions come from the goose voids automatically; the print only settles clearances and polarity. Output: the fit profile JSON.
 - **Phase 1, headless fit.** A script that takes the goose, an accessory STL, a magnet point name and a transform, and writes the fitted STL. Tested first by re-fitting an existing accessory and checking it matches the original within the clearance. Output: a fitted print that seats.
@@ -105,6 +105,35 @@ Each phase ends with a print, not a demo: the gate on each phase is what has to 
 - **Phase 3, polish.** Whatever the first real uses ask for: embossed polarity marks, batch fitting of several accessories, minimum-thickness warnings, goose-side pocket export, the offline repair path for messy downloads.
 
 **Painting before export.** After Fit, a brush tool colours faces of the accessory in the viewer, with a palette of filament colours and a bucket fill bounded by sharp edges. STL cannot carry colour, so painted models export as 3MF, which Bambu Studio, PrusaSlicer and OrcaSlicer read as paint-on colour regions for multi-material printing (plain STL export stays for single-colour parts). Painting happens after Fit so the cut and pocket faces exist to be painted, and the brush uses the same BVH as snapping. Landing: a first brush and 3MF export in Phase 2, fill and edge-aware tools in Phase 3.
+
+## Accessory models: downloaded, not generated
+
+Accessories built from primitives (cones, spheres, tori) look crude next to
+the goose, so the library is made of downloaded models: hats, scarves,
+glasses, holiday items from Printables, Thingiverse, MakerWorld, Thangs or
+Cults3D, kept with their licence in `accessories/<name>/`. The app's job is
+to make any such model fit fast:
+
+1. **Import** STL, OBJ or 3MF (several parts are joined), by file picker or drag and drop.
+2. **Prepare**: choose the side that meets the goose, scale to a width (or a factor, for models in inches), centre on the whole model or its bottom face, and add a plug of solid material under hollow models so there is something to carve and to hold the magnet.
+3. **Place and fit** at a magnet point as before, then paint and export.
+
+**Clothing.** Shirts, sweaters and coats follow the body instead of a
+magnet point and need no magnets. The goose is sampled as a radial profile
+around a vertical axis through the body; sweeping that profile downward
+(each section grows to contain everything above it) gives the smallest
+shape a rigid garment can slide down over, with no undercuts near the hem.
+The garment is that shape offset by a clearance (inside) and by clearance
+plus wall thickness (outside), lofted into one shell between a hem and a
+neck height. The collar has two modes: *tilt* (default) follows the body
+below the neck and opens at the front where the head and beak pass, so the
+garment goes on tilted, beak first; *drop* makes every section clear the
+head and beak so it drops straight on, at the cost of a front wall that
+stands about 25 mm off the chest. A downloaded garment is handled the same
+way: its vertices keep their height fraction, angle and distance from the
+garment's own inner surface and are re-seated on the goose's profile, then
+the drop-on solid is subtracted so it is hollow and slides over the head.
+Ribs, buttons and collars survive the stretch; sleeves do not map well yet.
 
 ## Still needed from Jerred
 

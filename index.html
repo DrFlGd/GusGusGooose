@@ -14,18 +14,41 @@
 
       <nav class="tabs">
         <button data-tab="accessory" class="active">Accessory</button>
+        <button data-tab="clothing">Clothing</button>
         <button data-tab="hole">Magnet hole</button>
         <button data-tab="paint" id="paint-tab-button" disabled title="Fit an accessory first">Paint</button>
       </nav>
 
       <section id="tab-accessory" class="tab">
         <label class="file">
-          <input type="file" id="accessory-file" accept=".stl" />
-          <span>Load accessory STL</span>
+          <input type="file" id="accessory-file" accept=".stl,.obj,.3mf" />
+          <span>Load a model (STL, OBJ or 3MF), or drop it on the view</span>
         </label>
-        <p class="muted small">Accessory frame: base centred on the origin, +Z up, the −Z side meets the goose.</p>
+        <div id="prepare-controls" class="hidden">
+          <p id="model-info" class="small muted"></p>
+          <label>Side that meets the goose
+            <select id="prep-down">
+              <option value="-z">Bottom (−Z, as downloaded)</option>
+              <option value="+z">Top (+Z, flip it over)</option>
+              <option value="-y">Front (−Y)</option>
+              <option value="+y">Back (+Y)</option>
+              <option value="-x">Left (−X)</option>
+              <option value="+x">Right (+X)</option>
+            </select>
+          </label>
+          <label>Width across the goose <input type="number" id="prep-width" step="0.5" placeholder="keep size" /> mm</label>
+          <label>Scale × <input type="number" id="prep-scale" step="0.01" value="1" /> <span class="muted small">(25.4 for a model in inches; ignored when a width is set)</span></label>
+          <label>Centre on
+            <select id="prep-centre">
+              <option value="bbox">the whole model</option>
+              <option value="footprint">the bottom face only</option>
+            </select>
+          </label>
+          <label>Plug under hollow models: diameter <input type="number" id="prep-plug-d" step="0.5" value="0" /> mm, height <input type="number" id="prep-plug-h" step="0.5" value="8" /> mm</label>
+          <p class="muted small">A plug is a solid cylinder from the base up into the model, so a hollow hat has material to carve and to hold the magnet.</p>
+        </div>
         <details id="generator">
-          <summary>Or generate a base</summary>
+          <summary>Or generate a plain base</summary>
           <label>Shape
             <select id="gen-shape">
               <option value="puck">Puck (cylinder)</option>
@@ -80,6 +103,35 @@
         </div>
       </section>
 
+      <section id="tab-clothing" class="tab hidden">
+        <p class="small muted">A shirt, sweater or coat that follows the body between two heights and slips on over the head. No magnets. The two rings on the goose show the hem and neck.</p>
+        <label>Hem height <output id="cloth-hem-out">46</output> mm
+          <input type="range" id="cloth-hem" min="10" max="150" step="1" value="46" />
+        </label>
+        <label>Neck height <output id="cloth-neck-out">108</output> mm
+          <input type="range" id="cloth-neck" min="20" max="175" step="1" value="108" />
+        </label>
+        <label>Wall thickness <input type="number" id="cloth-thick" step="0.1" value="1.6" /> mm</label>
+        <label>Clearance to the body <input type="number" id="cloth-clear" step="0.05" value="0.4" /> mm</label>
+        <label>Collar
+          <select id="cloth-collar">
+            <option value="tilt">Opens at the front; goes on tilted, beak first</option>
+            <option value="drop">Clears head and beak; drops straight on</option>
+          </select>
+        </label>
+        <label>Extra gap at the neck <input type="number" id="cloth-gap" step="0.5" value="1" /> mm</label>
+        <label>Smoothing <input type="number" id="cloth-smooth" step="1" min="0" max="6" value="2" /></label>
+        <div class="row">
+          <button id="make-shirt" class="primary">Make shirt</button>
+          <button id="wrap-garment" disabled title="Load a garment model on the Accessory tab first">Wrap loaded model</button>
+        </div>
+        <p id="cloth-result" class="small"></p>
+        <div class="row">
+          <button id="export-cloth" disabled>Export STL</button>
+        </div>
+        <p class="muted small">Paint it on the Paint tab and export a 3MF there. Wrapping takes the model loaded on the Accessory tab (hem at its bottom), stretches it over the body and hollows it.</p>
+      </section>
+
       <section id="tab-hole" class="tab hidden">
         <p class="small muted">Click the goose to pick a spot. The hole follows the surface normal there.</p>
         <p id="pick" class="small">No spot picked.</p>
@@ -128,6 +180,10 @@
       <section class="points">
         <h2>Magnet points</h2>
         <ul id="points"></ul>
+      </section>
+      <section id="goose-colours-section" class="hidden">
+        <h2>Goose colours</h2>
+        <div id="goose-colours"></div>
       </section>
     </aside>
     <main id="view"></main>

@@ -45,3 +45,5 @@ button:disabled { opacity: 0.4; cursor: default; }
 #points li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; font-size: 12px; cursor: pointer; }
 #points li.active { border-color: var(--accent); }
 #points li b { display: block; font-size: 13px; }
+#goose-colours { display: flex; flex-wrap: wrap; gap: 6px; }
+#view.drop { outline: 3px dashed var(--accent); outline-offset: -3px; }

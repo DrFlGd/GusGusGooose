@@ -5,7 +5,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
-import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, manifold, toManifold, type FitProfile, type FitResult, type Placement } from '../fit.ts';
+import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
+import { loadModel } from '../load-model.ts';
+import { DEFAULT_PREPARE, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
+import { contourGarment, wrapGarment, type GarmentOptions } from '../clothing.ts';
+import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
 import { write3mf, type Material } from '../threemf-write.ts';
@@ -71,6 +75,15 @@ let accessoryObject: THREE.Mesh | null = null;
 let fittedObject: THREE.Mesh | null = null;
 let fitted: FitResult | null = null;
 let activePoint = '';
+// the goose's colours: one material per filament, tracked through booleans as Manifold runs
+let gooseMaterials: Material[] = [{ name: 'Goose', color: '#e9dcc3' }];
+let gooseFaceMaterial: Uint8Array | null = null;
+let gooseFirstID = 0;
+let gooseFallback = 0;
+// the loaded model before preparation, and how it is prepared
+let rawModel: ManifoldT | null = null;
+let rawName = '';
+const prep: PrepareOptions = { ...DEFAULT_PREPARE };
 const markers = new THREE.Group();
 scene.add(markers);
 let pick: { point: V3; normal: V3 } | null = null;
@@ -79,25 +92,84 @@ let pickMarker: THREE.Object3D | null = null;
 const status = (s: string) => { $('status').textContent = s; };
 
 async function init() {
-  const [stl, prof] = await Promise.all([
+  const [stl, prof, colors] = await Promise.all([
     fetch(import.meta.env.BASE_URL + 'goose.stl').then((r) => r.arrayBuffer()),
     fetch(import.meta.env.BASE_URL + 'profile.json').then((r) => (r.ok ? r.json() : { ...DEFAULT_PROFILE, points: {} })),
+    fetch(import.meta.env.BASE_URL + 'goose-colors.json').then((r) => (r.ok ? (r.json() as Promise<GooseColors>) : null)).catch(() => null),
   ]);
   gooseMesh = parseStl(stl);
   profile = prof;
-  setGoose(gooseMesh);
+  if (colors && colors.materials.length) {
+    gooseMaterials = colors.materials;
+    gooseFaceMaterial = expandRuns(colors, gooseMesh.triangles.length / 3);
+    // the fallback for faces a cut creates: the material with the most faces
+    const counts = new Array<number>(gooseMaterials.length).fill(0);
+    for (const m of gooseFaceMaterial) counts[m]++;
+    gooseFallback = counts.indexOf(Math.max(...counts));
+  }
+  setGoose(gooseMesh, gooseFaceMaterial);
+  renderGooseColours();
   status('Starting geometry engine…');
-  await manifold();
-  gooseManifold = await toManifold(gooseMesh);
+  const { Manifold } = await manifold();
+  if (gooseFaceMaterial) {
+    gooseFirstID = Manifold.reserveIDs(gooseMaterials.length);
+    gooseManifold = await toManifoldTagged(gooseMesh, gooseFaceMaterial, gooseFirstID);
+  } else {
+    gooseManifold = await toManifold(gooseMesh);
+  }
   status(`Goose loaded: ${(gooseMesh.triangles.length / 3).toLocaleString()} triangles, ${Object.keys(profile.points).length} magnet points.`);
   renderPoints();
 }
 
-function setGoose(mesh: IndexedMesh) {
+function setGoose(mesh: IndexedMesh, faceMaterial: Uint8Array | null = null) {
   gooseMesh = mesh;
+  gooseFaceMaterial = faceMaterial;
   if (gooseObject) { scene.remove(gooseObject); gooseObject.geometry.dispose(); }
-  gooseObject = new THREE.Mesh(toGeometry(mesh), gooseMaterial);
+  gooseObject = faceMaterial
+    ? new THREE.Mesh(colouredGeometry(mesh, faceMaterial, gooseMaterials), gooseColouredMaterial)
+    : new THREE.Mesh(toGeometry(mesh), gooseMaterial);
   scene.add(gooseObject);
+}
+
+const gooseColouredMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 });
+
+/** Non-indexed geometry with smooth normals and one colour per face. */
+function colouredGeometry(mesh: IndexedMesh, faceMaterial: Uint8Array, materials: Material[]): THREE.BufferGeometry {
+  const indexed = toGeometry(mesh); // smooth vertex normals
+  const normals = indexed.getAttribute('normal') as THREE.BufferAttribute;
+  const n = mesh.triangles.length / 3;
+  const pos = new Float32Array(n * 9), nor = new Float32Array(n * 9), col = new Float32Array(n * 9);
+  const rgb = materials.map((m) => new THREE.Color(m.color));
+  for (let i = 0; i < mesh.triangles.length; i++) {
+    const v = mesh.triangles[i] * 3;
+    pos[i * 3] = mesh.positions[v]; pos[i * 3 + 1] = mesh.positions[v + 1]; pos[i * 3 + 2] = mesh.positions[v + 2];
+    nor[i * 3] = normals.getX(mesh.triangles[i]); nor[i * 3 + 1] = normals.getY(mesh.triangles[i]); nor[i * 3 + 2] = normals.getZ(mesh.triangles[i]);
+    const c = rgb[faceMaterial[(i / 3) | 0]] ?? rgb[0];
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  indexed.dispose();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
+
+/** Colour pickers for the goose's filaments; purely for the view. */
+function renderGooseColours() {
+  const el = $('goose-colours');
+  el.innerHTML = '';
+  if (!gooseFaceMaterial) return;
+  $('goose-colours-section').classList.remove('hidden');
+  gooseMaterials.forEach((m) => {
+    const sw = document.createElement('label');
+    sw.className = 'swatch';
+    const color = document.createElement('input');
+    color.type = 'color'; color.value = m.color;
+    color.oninput = () => { m.color = color.value; if (gooseFaceMaterial) setGoose(gooseMesh, gooseFaceMaterial); };
+    sw.append(color, document.createTextNode(m.name));
+    el.appendChild(sw);
+  });
 }
 
 // ---------- magnet points ----------
@@ -121,6 +193,7 @@ function renderPoints() {
   }
   if (!activePoint && Object.keys(profile.points).length) { activePoint = Object.keys(profile.points)[0]; renderPoints(); return; }
   select.value = activePoint;
+  pointHint();
 }
 
 function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
@@ -134,25 +207,78 @@ function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
 }
 
 // ---------- accessory ----------
-$<HTMLInputElement>('accessory-file').onchange = async (e) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (!file) return;
+// sensible widths for a model at each point, mm, shown as the placeholder
+const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16 };
+
+async function loadFile(file: File) {
   status(`Reading ${file.name}…`);
   try {
-    accessoryMesh = parseStl(await file.arrayBuffer());
-    accessoryManifold = await toManifold(accessoryMesh);
+    const loaded = await loadModel(file.name, await file.arrayBuffer());
+    rawModel = loaded.solid;
+    rawName = file.name;
+    const bb = rawModel.boundingBox();
+    const size = bb.max.map((v, i) => (v - bb.min[i]).toFixed(1)).join(' × ');
+    $('model-info').textContent = `${file.name}: ${loaded.triangles.toLocaleString()} triangles${loaded.parts > 1 ? `, ${loaded.parts} parts joined` : ''}, ${size} mm as downloaded.`;
   } catch (err) {
     status(`${file.name}: ${(err as Error).message}`);
     return;
   }
+  baseManifold = null;
+  $('prepare-controls').classList.remove('hidden');
+  $<HTMLButtonElement>('wrap-garment').disabled = false;
+  setTab('accessory');
+  await applyPrepare();
+}
+
+/** Re-runs the prepare step on the loaded model and shows it as the accessory. */
+async function applyPrepare() {
+  if (!rawModel) return;
+  prep.down = $<HTMLSelectElement>('prep-down').value as Side;
+  prep.scale = Number($<HTMLInputElement>('prep-scale').value) || 1;
+  const w = $<HTMLInputElement>('prep-width').value;
+  prep.width = w === '' ? undefined : Number(w);
+  prep.centre = $<HTMLSelectElement>('prep-centre').value as PrepareOptions['centre'];
+  const pd = Number($<HTMLInputElement>('prep-plug-d').value), ph = Number($<HTMLInputElement>('prep-plug-h').value);
+  prep.plug = pd > 0 && ph > 0 ? { diameter: pd, height: ph } : undefined;
+  try {
+    const prepared = await prepareAccessory(rawModel, prep);
+    accessoryManifold = prepared.solid;
+    accessoryMesh = fromManifold(prepared.solid);
+    const size = prepared.size.map((v) => v.toFixed(1)).join(' × ');
+    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}. Place it, then Fit.`);
+  } catch (err) {
+    status(`Prepare failed: ${(err as Error).message}`);
+    return;
+  }
+  showAccessory();
+}
+
+function showAccessory() {
+  if (!accessoryMesh) return;
   clearFitted();
   if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); }
   accessoryObject = new THREE.Mesh(toGeometry(accessoryMesh), accessoryMaterial);
   scene.add(accessoryObject);
   $('accessory-controls').classList.remove('hidden');
-  status(`${file.name}: ${(accessoryMesh.triangles.length / 3).toLocaleString()} triangles. Place it, then Fit.`);
   updatePreview();
+}
+
+$<HTMLInputElement>('accessory-file').onchange = (e) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) loadFile(file);
 };
+for (const id of ['prep-down', 'prep-width', 'prep-scale', 'prep-centre', 'prep-plug-d', 'prep-plug-h']) {
+  $<HTMLInputElement>(id).onchange = () => { applyPrepare(); };
+}
+// drag a file anywhere onto the page
+for (const ev of ['dragenter', 'dragover']) document.addEventListener(ev, (e) => { e.preventDefault(); view.classList.add('drop'); });
+document.addEventListener('dragleave', (e) => { if (!(e as DragEvent).relatedTarget) view.classList.remove('drop'); });
+document.addEventListener('drop', (e) => {
+  e.preventDefault();
+  view.classList.remove('drop');
+  const file = (e as DragEvent).dataTransfer?.files?.[0];
+  if (file) loadFile(file);
+});
 
 // ---------- base generators ----------
 $<HTMLSelectElement>('gen-shape').onchange = (e) => {
@@ -201,13 +327,8 @@ async function useBase() {
   if (decorationManifold) m = m.add(decorationManifold);
   accessoryManifold = m;
   accessoryMesh = fromManifold(m);
-  clearFitted();
-  if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); }
-  accessoryObject = new THREE.Mesh(toGeometry(accessoryMesh), accessoryMaterial);
-  scene.add(accessoryObject);
-  $('accessory-controls').classList.remove('hidden');
+  showAccessory();
   status(`Base generated${decorationManifold ? ' with decoration' : ''}. Place it, then Fit.`);
-  updatePreview();
 }
 $('generate').onclick = () => { useBase().catch((e) => status(`Generate failed: ${e.message}`)); };
 for (const id of ['gen-w', 'gen-d', 'gen-h', 'gen-i']) $<HTMLInputElement>(id).onchange = () => { if (baseManifold) useBase(); };
@@ -271,12 +392,17 @@ for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial',
   $<HTMLInputElement>(id).onchange = clearFitted;
 }
 $<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTMLSelectElement).value; clearFitted(); renderPoints(); updatePreview(); };
+function pointHint() {
+  const w = POINT_WIDTH[activePoint];
+  $<HTMLInputElement>('prep-width').placeholder = w ? `keep size (about ${w} for the ${activePoint.replace('_', ' ')})` : 'keep size';
+}
 
 function clearFitted() {
   if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); fittedObject = null; }
   fitted = null;
   paint = null;
   $<HTMLButtonElement>('export-fitted').disabled = true;
+  $<HTMLButtonElement>('export-cloth').disabled = true;
   $<HTMLButtonElement>('paint-tab-button').disabled = true;
   $('fit-result').textContent = '';
   if (accessoryObject) accessoryObject.visible = true;
@@ -407,7 +533,9 @@ let tab = 'accessory';
 function setTab(name: string) {
   tab = name;
   for (const x of document.querySelectorAll<HTMLButtonElement>('.tabs button')) x.classList.toggle('active', x.dataset.tab === name);
-  for (const t of ['accessory', 'hole', 'paint']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['accessory', 'clothing', 'hole', 'paint']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  guides.visible = name === 'clothing';
+  if (name === 'clothing') updateGuides();
   // in paint mode the left button paints and the right button orbits
   controls.mouseButtons = name === 'paint'
     ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
@@ -423,6 +551,70 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 renderer.domElement.addEventListener('pointermove', (e) => { if (painting) paintAt(e); });
 window.addEventListener('pointerup', () => { painting = false; });
+
+// ---------- clothing ----------
+// two rings on the goose mark the hem and neck heights
+const guides = new THREE.Group();
+guides.visible = false;
+scene.add(guides);
+function ring(color: number): THREE.LineLoop {
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i < 96; i++) { const a = (i / 96) * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * 72, Math.sin(a) * 72, 0)); }
+  return new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color }));
+}
+const hemRing = ring(0xf2b84b), neckRing = ring(0x6fb1ff);
+guides.add(hemRing, neckRing);
+function garmentOptions(): Partial<GarmentOptions> {
+  return {
+    hem: Number($<HTMLInputElement>('cloth-hem').value),
+    neck: Number($<HTMLInputElement>('cloth-neck').value),
+    thickness: Number($<HTMLInputElement>('cloth-thick').value),
+    clearance: Number($<HTMLInputElement>('cloth-clear').value),
+    collar: $<HTMLSelectElement>('cloth-collar').value as GarmentOptions['collar'],
+    collarGap: Number($<HTMLInputElement>('cloth-gap').value),
+    smooth: Number($<HTMLInputElement>('cloth-smooth').value),
+  };
+}
+function updateGuides() {
+  const o = garmentOptions();
+  $('cloth-hem-out').textContent = String(o.hem);
+  $('cloth-neck-out').textContent = String(o.neck);
+  const bb = gooseMesh ? gooseObject.geometry.boundingBox ?? gooseObject.geometry.computeBoundingBox() ?? gooseObject.geometry.boundingBox : null;
+  const cx = bb ? (bb.min.x + bb.max.x) / 2 : 115, cy = bb ? (bb.min.y + bb.max.y) / 2 : 140;
+  hemRing.position.set(cx, cy, o.hem!);
+  neckRing.position.set(cx, cy, o.neck!);
+}
+for (const id of ['cloth-hem', 'cloth-neck']) $<HTMLInputElement>(id).oninput = updateGuides;
+
+async function makeGarment(kind: 'shirt' | 'wrap') {
+  const o = garmentOptions();
+  if (o.neck! <= o.hem!) { status('The neck must be above the hem.'); return; }
+  if (kind === 'wrap' && !accessoryManifold) { status('Load a garment model on the Accessory tab first.'); return; }
+  status(kind === 'shirt' ? 'Building the shirt…' : 'Wrapping the model over the body…');
+  $<HTMLButtonElement>('make-shirt').disabled = true;
+  $<HTMLButtonElement>('wrap-garment').disabled = true;
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    const t0 = performance.now();
+    const g = kind === 'shirt' ? await contourGarment(gooseManifold, o) : await wrapGarment(accessoryManifold!, gooseManifold, o);
+    clearFitted();
+    showFitted(g.mesh);
+    garmentName = kind === 'shirt' ? `shirt.${o.hem}-${o.neck}` : `${rawName.replace(/\.[^.]+$/, '')}.wrapped`;
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    $('cloth-result').textContent = `Done in ${secs} s: ${g.solid.volume().toFixed(0)} mm³, ${(g.mesh.triangles.length / 3).toLocaleString()} faces. ${g.warnings.join('; ')}`;
+    $<HTMLButtonElement>('export-cloth').disabled = false;
+    status('Garment ready. Export it, or paint it on the Paint tab.');
+  } catch (err) {
+    status(`Failed: ${(err as Error).message}`);
+  } finally {
+    $<HTMLButtonElement>('make-shirt').disabled = false;
+    $<HTMLButtonElement>('wrap-garment').disabled = !accessoryManifold;
+  }
+}
+let garmentName = 'shirt';
+$('make-shirt').onclick = () => { makeGarment('shirt'); };
+$('wrap-garment').onclick = () => { makeGarment('wrap'); };
+$('export-cloth').onclick = () => { if (paint) download(`${garmentName}.stl`, serializeStl(paint.mesh)); };
 
 // ---------- magnet hole tool ----------
 $<HTMLSelectElement>('hole-mode').onchange = (e) => {
@@ -465,7 +657,12 @@ $('cut-hole').onclick = async () => {
       skin: Number($<HTMLInputElement>('hole-skin').value),
     });
     gooseManifold = result.model;
-    setGoose(fromManifold(gooseManifold));
+    if (gooseFaceMaterial) {
+      const tagged = fromManifoldTagged(gooseManifold, gooseFirstID, gooseMaterials.length, gooseFallback);
+      setGoose(tagged.mesh, tagged.faceMaterial);
+    } else {
+      setGoose(fromManifold(gooseManifold));
+    }
     profile.points[name] = result.point;
     activePoint = name;
     renderPoints();

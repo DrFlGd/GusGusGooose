@@ -82,6 +82,43 @@ console.log('3e.', await status(), '→', threemf);
 await page.screenshot({ path: join(out, '3c-painted.png') });
 await page.click('.tabs button[data-tab="accessory"]');
 
+// a downloaded model: a 3MF with two parts, dropped in, flipped, scaled to 20 mm wide, with a plug
+const { write3mf } = await import('../src/threemf-write.ts');
+const { fromManifold, manifold } = await import('../src/fit.ts');
+const { Manifold } = await manifold();
+const hollow = Manifold.sphere(15, 32).subtract(Manifold.sphere(13, 32)).intersect(Manifold.cube([40, 40, 20], true).translate(0, 0, -10)); // open side up
+const hollowMesh = fromManifold(hollow);
+const threeMf = write3mf(hollowMesh, [{ name: 'Grey', color: '#888888' }], new Uint8Array(hollowMesh.triangles.length / 3), 'hollow dome');
+await page.click('.tabs button[data-tab="accessory"]');
+await page.setInputFiles('#accessory-file', { name: 'dome.3mf', mimeType: 'application/octet-stream', buffer: Buffer.from(threeMf) });
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('after preparing'), null, { timeout: 30000 });
+console.log('6.', await page.locator('#model-info').textContent());
+await page.selectOption('#prep-down', '+z');
+await page.fill('#prep-width', '20');
+await page.fill('#prep-plug-d', '14');
+await page.dispatchEvent('#prep-plug-d', 'change');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('scaled'), null, { timeout: 30000 });
+console.log('6b.', await status());
+await page.selectOption('#point', 'head');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('6c.', await page.locator('#fit-result').textContent());
+await page.screenshot({ path: join(out, '6-imported-dome.png') });
+
+// clothing: a shirt, then the dome wrapped as a garment
+await page.click('.tabs button[data-tab="clothing"]');
+await page.click('#make-shirt');
+await page.waitForFunction(() => document.getElementById('cloth-result').textContent.startsWith('Done'), null, { timeout: 120000 });
+console.log('7.', await page.locator('#cloth-result').textContent());
+await page.screenshot({ path: join(out, '7-shirt.png') });
+await page.click('#wrap-garment');
+await page.waitForFunction(() => document.getElementById('cloth-result').textContent.startsWith('Done') && !document.getElementById('cloth-result').textContent.includes('shirt'), null, { timeout: 120000 }).catch(() => {});
+await page.waitForFunction(() => !document.getElementById('wrap-garment').disabled, null, { timeout: 120000 });
+console.log('7b.', await status(), '|', await page.locator('#cloth-result').textContent());
+await page.screenshot({ path: join(out, '7b-wrapped.png') });
+const [clothDl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-cloth')]);
+console.log('7c. exported', clothDl.suggestedFilename());
+
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
 const box = await page.locator('#view canvas').boundingBox();
