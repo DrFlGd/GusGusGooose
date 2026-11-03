@@ -59,7 +59,7 @@ async function detect() {
 async function fit() {
   const accessoryPath = arg('accessory');
   const point = arg('point');
-  if (!accessoryPath || !point) throw new Error('usage: fit --accessory file.stl --point head [--sink 2] [--spin 0] [--tilt-x 0] [--tilt-y 0] [--dx 0] [--dy 0] [--magnet-dia 6] [--magnet-thick 3] [--pocket-radial 0] [--pocket-axial 0.1] [--no-pocket] [--out fitted.stl]');
+  if (!accessoryPath || !point) throw new Error('usage: fit --accessory file.stl --point head [--sink 2] [--spin 0] [--tilt-x 0] [--tilt-y 0] [--dx 0] [--dy 0] [--magnet-dia 6] [--magnet-thick 3] [--pocket-radial 0] [--pocket-axial 0.1] [--ribs 3 --rib-crush 0.15] [--no-pocket] [--out fitted.stl]');
   const num = (name: string) => (arg(name) === undefined ? undefined : Number(arg(name)));
   const profile: FitProfile = JSON.parse(readFileSync(arg('profile', PROFILE)!, 'utf8'));
   const goose = await toManifold(readStl(arg('goose', GOOSE)!));
@@ -76,6 +76,8 @@ async function fit() {
       radialClearance: num('pocket-radial'),
       axialClearance: num('pocket-axial'),
       none: process.argv.includes('--no-pocket'),
+      ribs: num('ribs'),
+      ribCrush: num('rib-crush'),
     },
   });
   const out = arg('out', accessoryPath.replace(/\.stl$/i, '') + `.${point}.fitted.stl`)!;

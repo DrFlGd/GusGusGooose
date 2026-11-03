@@ -54,6 +54,10 @@ export interface PocketSpec {
   axialClearance?: number;
   /** skip the pocket entirely, for accessories that hold their magnet some other way */
   none?: boolean;
+  /** crush ribs on the pocket wall: how many (0 = none). They let a loose pocket grip the magnet. */
+  ribs?: number;
+  /** how far each rib's tip reaches inside the magnet's nominal radius, mm (default 0.15); the rib squashes by that much */
+  ribCrush?: number;
 }
 
 export interface FitResult {
@@ -224,7 +228,15 @@ export async function fitAccessory(
     ? pt.size.map((s) => s + 2 * (spec.radialClearance ?? profile.pocketRadialClearance)) as [number, number]
     : undefined;
   if (!spec.none) {
-    const pocket = pocketSolid(Manifold, pt, radius, boxSize, depth, reach, profile.clearance);
+    let pocket = pocketSolid(Manifold, pt, radius, boxSize, depth, reach, profile.clearance);
+    if (spec.ribs && spec.ribs > 0) {
+      // ribs stay behind when the pocket is cut: round ridges on the wall, led in from the mouth, whose tips sit
+      // `ribCrush` inside the magnet so they squash as it goes in
+      const clearance = spec.radialClearance ?? profile.pocketRadialClearance;
+      const crush = spec.ribCrush ?? 0.15;
+      const ribs = crushRibs(Manifold, pt, radius, boxSize, depth, clearance + crush, spec.ribs, profile.clearance);
+      if (ribs) pocket = pocket.subtract(ribs);
+    }
     fitted = fitted.subtract(pocket);
   }
 
@@ -269,6 +281,46 @@ function pocketSolid(
     : Manifold.cylinder(depth + reach, radius, radius, 64, false).translate(0, 0, -reach);
   const frame = pt.sideAxis ? frameFromAxes(origin, pt.sideAxis, pt.axis) : frameAt(origin, pt.axis);
   return body.transform(frame as any);
+}
+
+/**
+ * Crush ribs for a pocket: `count` round ridges of radius `rr` centred on the
+ * pocket wall (spread round a cylinder, or along the sides of a box), running
+ * from the mouth to the floor, tapered to nothing over the first millimetre
+ * so the magnet finds its way in.
+ */
+function crushRibs(
+  Manifold: ManifoldToplevel['Manifold'],
+  pt: MagnetVoid,
+  radius: number,
+  boxSize: [number, number] | undefined,
+  depth: number,
+  rr: number,
+  count: number,
+  lift: number,
+): ManifoldT | null {
+  if (rr <= 0 || depth <= 0) return null;
+  const lead = Math.min(1, depth / 2);
+  const rib = Manifold.cylinder(lead, 0.01, rr, 24, false).add(Manifold.cylinder(depth - lead + 0.2, rr, rr, 24, false).translate(0, 0, lead));
+  const placed: ManifoldT[] = [];
+  if (boxSize) {
+    const perSide = Math.max(1, Math.round(count / 4));
+    for (const [sx, sy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const along = sx ? boxSize[1] : boxSize[0];
+      for (let i = 0; i < perSide; i++) {
+        const t = ((i + 1) / (perSide + 1) - 0.5) * along;
+        placed.push(rib.translate(sx ? sx * boxSize[0] / 2 : t, sy ? sy * boxSize[1] / 2 : t, 0));
+      }
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      placed.push(rib.translate(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+    }
+  }
+  const origin = add(pt.center, scale(pt.axis, lift));
+  const frame = pt.sideAxis ? frameFromAxes(origin, pt.sideAxis, pt.axis) : frameAt(origin, pt.axis);
+  return Manifold.union(placed).transform(frame as any);
 }
 
 /** Column-major 4x4 with local +X along `x` (made perpendicular to `z`) and +Z along `z`. */

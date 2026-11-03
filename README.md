@@ -35,7 +35,12 @@ the camera (type the text, set the letter height and angle, click to
 stamp); with Refine to split the mesh so edges and letters come out finer,
 Fill all and Undo. It exports a 3MF whose colour regions the slicer maps
 to filaments (STL stays for single-colour parts). The panel walks each tab
-in numbered steps and every slider has a number box beside it. A 3MF that comes in with colours keeps them: each
+in numbered steps and every slider has a number box beside it. The pocket
+takes a magnet from a list of common discs (or a typed size, or the
+goose's own void), a fit preset (press, snug, loose, or crush ribs) that
+sets the clearances, and crush ribs: round ridges down the pocket wall,
+tapered at the mouth, whose tips sit a set distance inside the magnet so
+a loose pocket still grips. A 3MF that comes in with colours keeps them: each
 part's filament slot, paint applied in Bambu Studio or PrusaSlicer (a
 triangle painted in more than one colour takes the colour covering most of
 it), and standard 3MF material groups, including the app's own exports.

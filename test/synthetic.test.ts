@@ -98,3 +98,23 @@ test('per-accessory pocket overrides change the pocket size', async () => {
   const magnet = Math.PI * 9 * 3.1;
   assert.ok(Math.abs(pocketOnly - magnet) < 6, `stock pocket volume ${pocketOnly}, expected about ${magnet}`);
 });
+
+test('crush ribs leave ridges in a loose pocket that reach inside the magnet', async () => {
+  const { Manifold } = await manifold();
+  const goose = await syntheticGoose();
+  const voids = findVoids(fromManifold(goose));
+  const names = suggestNames(voids);
+  const profile: FitProfile = { ...DEFAULT_PROFILE, points: { head: voids[names.head] } };
+  const hat = await toManifold(fromManifold(Manifold.cylinder(8, 10, 10, 64, false)));
+  const base = { point: 'head', sink: 2, spin: 0, offset: [0, 0] as [number, number] };
+  const loose = await fitAccessory(goose, hat, profile, { ...base, pocket: { diameter: 6, thickness: 3, radialClearance: 0.25 } });
+  const ribbed = await fitAccessory(goose, hat, profile, { ...base, pocket: { diameter: 6, thickness: 3, radialClearance: 0.25, ribs: 3, ribCrush: 0.15 } });
+  const left = ribbed.volumeAfter - loose.volumeAfter;
+  assert.ok(left > 1 && left < 20, `ribs add ${left} mm³`);
+  // a disc the magnet's size minus the crush passes the ribs; the magnet's own size does not
+  const pt = profile.points.head;
+  const disc = (r: number) => Manifold.cylinder(1, r, r, 64, false).translate(0, 0, 1.5).transform(frameAt([pt.center[0], pt.center[1], pt.center[2] + profile.clearance], pt.axis) as any);
+  assert.equal(ribbed.solid.intersect(disc(3 - 0.15 - 0.03)).volume().toFixed(2), '0.00', 'clear inside the rib tips');
+  assert.ok(ribbed.solid.intersect(disc(3)).volume() > 0.05, 'the ribs reach inside the magnet radius');
+  assert.equal(loose.solid.intersect(disc(3 + 0.2)).volume().toFixed(2), '0.00', 'the loose pocket itself is clear');
+});

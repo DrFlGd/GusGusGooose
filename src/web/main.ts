@@ -465,8 +465,57 @@ function placement(): Placement {
       radialClearance: num('pocket-radial'),
       axialClearance: num('pocket-axial'),
       none: $<HTMLInputElement>('pocket-none').checked,
+      ribs: $<HTMLInputElement>('pocket-ribs').checked ? Number($<HTMLInputElement>('pocket-rib-count').value) || 3 : 0,
+      ribCrush: num('pocket-rib-crush'),
     },
   };
+}
+
+// ---------- magnet presets: common discs fill the size boxes, a fit preset the clearances; typing makes them custom ----------
+const MAGNET_SIZES = [[3, 1], [3, 2], [4, 1], [4, 2], [5, 1], [5, 2], [5, 3], [6, 1], [6, 2], [6, 3], [8, 2], [8, 3], [10, 2], [10, 3], [10, 4], [12, 2], [12, 3], [15, 3], [20, 3]];
+const FIT_PRESETS: Record<string, { radial: number; axial: number; ribs: boolean }> = {
+  press: { radial: 0, axial: 0.1, ribs: false },
+  snug: { radial: 0.1, axial: 0.1, ribs: false },
+  loose: { radial: 0.2, axial: 0.15, ribs: false },
+  ribs: { radial: 0.25, axial: 0.1, ribs: true },
+};
+{
+  const preset = $<HTMLSelectElement>('pocket-preset');
+  const custom = preset.querySelector('option[value="custom"]')!;
+  for (const [d, t] of MAGNET_SIZES) {
+    const o = document.createElement('option');
+    o.value = `${d}x${t}`; o.textContent = `${d} × ${t} mm disc`;
+    preset.insertBefore(o, custom);
+  }
+  preset.onchange = () => {
+    const v = preset.value;
+    const dia = $<HTMLInputElement>('pocket-dia'), thick = $<HTMLInputElement>('pocket-thick');
+    if (v === 'auto') { dia.value = ''; thick.value = ''; }
+    else if (v !== 'custom') { const [d, t] = v.split('x'); dia.value = d; thick.value = t; }
+    clearFitted();
+  };
+  for (const id of ['pocket-dia', 'pocket-thick']) $<HTMLInputElement>(id).addEventListener('input', () => {
+    const d = $<HTMLInputElement>('pocket-dia').value, t = $<HTMLInputElement>('pocket-thick').value;
+    const match = MAGNET_SIZES.find(([dd, tt]) => String(dd) === d && String(tt) === t);
+    preset.value = d === '' && t === '' ? 'auto' : match ? `${match[0]}x${match[1]}` : 'custom';
+  });
+  const fit = $<HTMLSelectElement>('pocket-fit');
+  fit.onchange = () => {
+    const p = FIT_PRESETS[fit.value];
+    if (!p) return;
+    $<HTMLInputElement>('pocket-radial').value = String(p.radial);
+    $<HTMLInputElement>('pocket-axial').value = String(p.axial);
+    $<HTMLInputElement>('pocket-ribs').checked = p.ribs;
+    clearFitted();
+  };
+  for (const id of ['pocket-radial', 'pocket-axial', 'pocket-ribs']) $<HTMLInputElement>(id).addEventListener('input', () => {
+    const r = Number($<HTMLInputElement>('pocket-radial').value), a = Number($<HTMLInputElement>('pocket-axial').value), ribs = $<HTMLInputElement>('pocket-ribs').checked;
+    const match = Object.entries(FIT_PRESETS).find(([, p]) => p.radial === r && p.axial === a && p.ribs === ribs);
+    fit.value = match ? match[0] : 'custom';
+  });
+  // the default press fit fills the boxes
+  $<HTMLInputElement>('pocket-radial').value = '0';
+  $<HTMLInputElement>('pocket-axial').value = '0.1';
 }
 
 function updatePreview() {
@@ -519,7 +568,7 @@ function showGizmo(on: boolean) {
   if (on && accessoryObject && accessoryObject.visible) gizmo.attach(accessoryPivot);
   else gizmo.detach();
 }
-for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial', 'pocket-none']) {
+for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial', 'pocket-none', 'pocket-ribs', 'pocket-rib-count', 'pocket-rib-crush']) {
   $<HTMLInputElement>(id).onchange = clearFitted;
 }
 $<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTMLSelectElement).value; clearFitted(); renderPoints(); updatePreview(); };

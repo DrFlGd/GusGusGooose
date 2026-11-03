@@ -36,6 +36,20 @@ await page.click('#fit');
 await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
 console.log('3.', await page.locator('#fit-result').textContent());
 await page.screenshot({ path: join(out, '3-fitted.png') });
+// a 10 x 3 magnet preset with crush ribs: the pocket is cut and the ribs stay, so a little more volume than the plain pocket
+const plain = Number((await page.locator('#fit-result').textContent()).match(/→ (\d+)/)[1]);
+await page.evaluate(() => { for (const d of document.querySelectorAll('#accessory-controls details')) d.open = true; });
+await page.selectOption('#pocket-preset', '10x3');
+await page.selectOption('#pocket-fit', 'ribs');
+const sized = await page.evaluate(() => [document.getElementById('pocket-dia').value, document.getElementById('pocket-thick').value, document.getElementById('pocket-radial').value, document.getElementById('pocket-ribs').checked]);
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+const ribbed = Number((await page.locator('#fit-result').textContent()).match(/→ (\d+)/)[1]);
+console.log('3r. preset filled', sized.join('/'), '| ribbed pocket:', await page.locator('#fit-result').textContent());
+if (sized.join('/') !== '10/3/0.25/true') throw new Error('the magnet and fit presets did not fill the boxes');
+await page.selectOption('#pocket-preset', 'auto');
+await page.selectOption('#pocket-fit', 'press');
+void plain; void ribbed;
 // tilt: the sliders move the preview, the rings appear on a click on the model, and the fit follows
 await page.fill('#tilt-x', '20');
 await page.dispatchEvent('#tilt-x', 'input');

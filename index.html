@@ -123,11 +123,29 @@
           </div>
           <details>
             <summary>Pocket and clearance</summary>
-            <p class="small muted">The pocket mirrors the goose's magnet unless set here.</p>
-            <div class="field"><span>Magnet diameter</span><span class="val"><input type="number" id="pocket-dia" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
-            <div class="field"><span>Magnet thickness</span><span class="val"><input type="number" id="pocket-thick" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Magnet</span>
+              <select id="pocket-preset">
+                <option value="auto">Same as the goose's void</option>
+                <option value="custom">Custom size</option>
+              </select>
+            </div>
+            <div class="field"><span>Diameter</span><span class="val"><input type="number" id="pocket-dia" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Thickness</span><span class="val"><input type="number" id="pocket-thick" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <p class="small muted">Pick a common disc or type the size; the magnet's own size, not the pocket's.</p>
+            <div class="field"><span>Fit</span>
+              <select id="pocket-fit">
+                <option value="press">Press fit (0 / 0.1 mm)</option>
+                <option value="snug">Snug (0.1 / 0.1 mm)</option>
+                <option value="loose">Loose, for glue (0.2 / 0.15 mm)</option>
+                <option value="ribs">Crush ribs (0.25 / 0.1 mm, 3 ribs)</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
             <div class="field"><span>Radial clearance</span><span class="val"><input type="number" id="pocket-radial" step="0.05" placeholder="0" /><span class="unit">mm</span></span></div>
             <div class="field"><span>Axial clearance</span><span class="val"><input type="number" id="pocket-axial" step="0.05" placeholder="0.1" /><span class="unit">mm</span></span></div>
+            <label class="check"><input type="checkbox" id="pocket-ribs" /> Crush ribs on the pocket wall</label>
+            <div class="field"><span>Ribs</span><span class="val"><input type="number" id="pocket-rib-count" step="1" min="1" max="12" value="3" /><span class="unit">×, crush</span><input type="number" id="pocket-rib-crush" step="0.05" min="0.05" max="0.5" value="0.15" /><span class="unit">mm</span></span></div>
+            <p class="small muted">Ribs are round ridges down the wall, tapered at the mouth, whose tips sit this far inside the magnet; they squash as it goes in, so the pocket can be loose and still grip. On a box pocket one rib per side.</p>
             <label class="check"><input type="checkbox" id="pocket-none" /> No pocket</label>
             <div class="slider">
               <div class="slider-head"><span>Surface clearance</span><span class="val"><input type="number" id="clearance-num" step="0.05" min="0" max="0.6" /><span class="unit">mm</span></span></div>
