@@ -210,7 +210,9 @@ function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
 // sensible widths for a model at each point, mm, shown as the placeholder
 const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16 };
 
-async function loadFile(file: File) {
+let loadSerial = 0;
+/** Loads a model as the accessory; from the Clothing tab (`stay`) it is shown there as the wrap ghost instead of switching tabs. */
+async function loadFile(file: File, stay = false) {
   status(`Reading ${file.name}…`);
   try {
     const loaded = await loadModel(file.name, await file.arrayBuffer());
@@ -224,11 +226,17 @@ async function loadFile(file: File) {
     return;
   }
   baseManifold = null;
+  loadSerial++;
   $('prepare-controls').classList.remove('hidden');
   $<HTMLButtonElement>('wrap-garment').disabled = false;
-  setTab('accessory');
+  if (!(stay && tab === 'clothing')) setTab('accessory');
   await applyPrepare();
+  if (tab === 'clothing') wrapPreview();
 }
+$<HTMLInputElement>('cloth-file').onchange = (e) => {
+  const f = (e.target as HTMLInputElement).files?.[0];
+  if (f) loadFile(f, true);
+};
 
 /** Re-runs the prepare step on the loaded model and shows it as the accessory. */
 async function applyPrepare() {
@@ -277,7 +285,7 @@ document.addEventListener('drop', (e) => {
   e.preventDefault();
   view.classList.remove('drop');
   const file = (e as DragEvent).dataTransfer?.files?.[0];
-  if (file) loadFile(file);
+  if (file) loadFile(file, true); // dropped on the Clothing tab, it stays there as the wrap ghost
 });
 
 // ---------- base generators ----------
@@ -593,6 +601,7 @@ let previewTimer = 0;
 function hideGhost() { if (ghost) ghost.visible = false; }
 function wrapPreview() {
   if (tab !== 'clothing' || !accessoryManifold || !gooseManifold) { hideGhost(); return; }
+  if (accessoryObject) accessoryObject.visible = false;
   const o = garmentOptions();
   if (o.neck! <= o.hem!) return;
   const key = [o.hem, o.neck, o.axisToNeck, o.clearance, o.collar, o.smooth, o.frontOffset].join('/');
@@ -604,7 +613,7 @@ function wrapPreview() {
     return;
   }
   if (!cavity) return;
-  const ck = [rawName, o.garmentBand, o.garmentCrop].join('/');
+  const ck = [loadSerial, rawName, o.garmentBand, o.garmentCrop].join('/');
   if (ck !== cropKey || !ghost) {
     cropKey = ck;
     if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); }
