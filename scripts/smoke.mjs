@@ -30,6 +30,17 @@ const layout = await page.evaluate(() => {
 });
 console.log('1b. layout:', JSON.stringify(layout));
 if (layout.page > 0 || layout.view > 0 || layout.canvas.some((d) => Math.abs(d) > 1) || layout.panel !== 'auto') throw new Error('the view or the page scrolls');
+// number boxes: the arrows nudge by 0.1, a typed value keeps two places (and the slider beside it holds it too)
+const boxes = await page.evaluate(() => {
+  const num = document.getElementById('sink-num');
+  num.value = '2.137';
+  num.dispatchEvent(new Event('change'));
+  const r = [num.step, num.value, document.getElementById('sink').value, document.getElementById('pocket-rib-count').step];
+  num.value = '2'; num.dispatchEvent(new Event('change'));
+  return r;
+});
+console.log('1c. number boxes:', boxes.join(' | '));
+if (boxes.join('|') !== '0.1|2.14|2.14|1') throw new Error('the number boxes do not nudge by 0.1 or keep 0.01');
 
 if (!process.env.SMOKE_FROM) { // SMOKE_FROM=8 skips to the picture, puck and neck steps
 // a puck accessory: 18 mm dia x 8 mm, built here so the test needs no fixture file

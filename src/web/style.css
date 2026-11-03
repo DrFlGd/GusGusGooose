@@ -102,12 +102,14 @@ label { display: block; margin: 10px 0 0; font-size: 13px; }
 .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 0; font-size: 13px; }
 .field > span:first-child { flex: 1; font-weight: 520; }
 .field > select, .field > input[type='text'] { flex: 1.3; max-width: 62%; margin: 0; }
-.val { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.val input[type='number'] { width: 66px; margin: 0; padding: 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
+.val { display: inline-flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; }
+.val input[type='number'] { width: 78px; min-width: 54px; flex: 0 1 78px; margin: 0; padding: 4px 4px 4px 6px; text-align: right; font-variant-numeric: tabular-nums; }
 .unit { color: var(--faint); font-size: 12px; }
 input[type='number'], input[type='text'], select { width: 100%; min-height: 32px; margin-top: 4px; padding: 5px 9px; background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
-input[type='number']::-webkit-inner-spin-button, input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-input[type='number'] { -moz-appearance: textfield; }
+/* the arrows stay visible: they nudge by 0.1 (typing takes finer values, which the step check must not flag) */
+input[type='number']::-webkit-inner-spin-button { opacity: 1; margin: 0 -2px 0 2px; cursor: pointer; }
+input[type='number']:invalid { box-shadow: none; }
+input[type='number']:user-invalid { box-shadow: none; }
 input:focus, select:focus { outline: none; border-color: var(--focus); }
 
 .slider { margin: 12px 0 0; }

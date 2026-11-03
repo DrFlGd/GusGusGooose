@@ -39,7 +39,10 @@ the camera (type the text, set the letter height and angle, click to
 stamp); with Refine to split the mesh so edges and letters come out finer,
 Fill all and Undo. It exports a 3MF whose colour regions the slicer maps
 to filaments (STL stays for single-colour parts). The panel walks each tab
-in numbered steps and every slider has a number box beside it. The pocket
+in numbered steps and every slider has a number box beside it. Number
+boxes have arrows that nudge by 0.1 and take typed values to 0.01 (counts
+such as ribs and buttons stay whole); a slider holds a typed value as well,
+and dragging it moves in its own steps. The pocket
 takes a magnet from a list of common discs (or a typed size, or the
 goose's own void), a fit preset (press, snug, loose, or crush ribs) that
 sets the clearances, and crush ribs: round ridges down the pocket wall,

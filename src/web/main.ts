@@ -27,10 +27,44 @@ import { facesUnderMask, insidePolygon } from '../paint-fill.ts';
 type V3 = [number, number, number];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
+// ---------- number boxes: the arrows nudge by 0.1, typing takes down to 0.01 ----------
+// (the step in the markup is overridden here; counts such as ribs or buttons stay whole numbers)
+const NUDGE = 0.1, FINE = 0.01;
+const COUNTS = new Set(['cloth-buttons', 'cloth-fabric-pitch', 'cloth-smooth', 'cloth-smooth-model', 'cloth-split-magnets', 'pocket-rib-count']);
+/** A value to two places, without float dust (2.1300000001 → "2.13"). */
+const fine = (v: number) => String(Number((Math.round(v / FINE) * FINE).toFixed(2)));
+function setupNumberBoxes() {
+  for (const box of document.querySelectorAll<HTMLInputElement>('input[type="number"]')) {
+    if (COUNTS.has(box.id)) continue;
+    box.step = String(NUDGE);
+    // first in line, so every other handler reads the rounded value
+    box.addEventListener('change', () => { if (box.value !== '' && Number.isFinite(Number(box.value))) box.value = fine(Number(box.value)); });
+  }
+}
+setupNumberBoxes();
+
 // ---------- sliders with a number box ----------
-/** Every range input with an `<id>-num` number box: the two follow each other, and a typed value fires the range's input handlers. */
+/**
+ * Every range input with an `<id>-num` number box: the two follow each other, and a typed value fires the range's
+ * input handlers. The range holds the typed value to 0.01; dragging it or its arrow keys move in its own step.
+ */
 function pairSliders() {
   for (const range of document.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
+    const snap = Number(range.step) || 1;
+    range.step = String(FINE);
+    range.addEventListener('input', (e) => {
+      // a drag lands on the slider's own steps; values set from code or the number box stay as given
+      if (e.isTrusted) range.value = fine(Math.round(Number(range.value) / snap) * snap);
+    });
+    range.addEventListener('keydown', (e) => {
+      const dir = { ArrowUp: 1, ArrowRight: 1, PageUp: 10, ArrowDown: -1, ArrowLeft: -1, PageDown: -10 }[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      const v = Math.max(Number(range.min), Math.min(Number(range.max), Number(range.value) + dir * snap));
+      range.value = fine(v);
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+      range.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     fillRange(range);
     range.addEventListener('input', () => fillRange(range));
     const num = document.getElementById(`${range.id}-num`) as HTMLInputElement | null;
