@@ -24,6 +24,7 @@ await page.waitForFunction(() => document.getElementById('status').textContent.s
 console.log('1.', await status());
 await page.screenshot({ path: join(out, '1-loaded.png') });
 
+if (!process.env.SMOKE_FROM) { // SMOKE_FROM=8 skips to the picture, puck and neck steps
 // a puck accessory: 18 mm dia x 8 mm, built here so the test needs no fixture file
 const puck = puckStl(9, 8, 64);
 writeFileSync(join(out, 'puck.stl'), puck);
@@ -219,6 +220,94 @@ console.log('7f. cleared:', cleared.join(' | '));
 if (!cleared[0] || !cleared[1] || !cleared[2]) throw new Error('clear left a button live');
 await page.screenshot({ path: join(out, '7f-cleared.png') });
 
+}
+
+// a picture: an SVG candy cane (red with white stripes) stands on the head, its puck under the bottom edge, facing the beak
+const cane = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 120"><rect x="20" y="20" width="20" height="100" fill="#d03b2f"/><path d="M20 30 A15 15 0 0 1 50 30 L50 50 L40 50 L40 30 A5 5 0 0 0 30 30 L30 40 L20 40 Z" fill="#d03b2f"/><rect x="20" y="50" width="20" height="12" fill="#ffffff"/><rect x="20" y="80" width="20" height="12" fill="#ffffff"/></svg>`;
+await page.click('.tabs button[data-tab="accessory"]');
+await page.evaluate(() => { const p = document.getElementById('point'); p.value = 'head'; p.dispatchEvent(new Event('change')); }); // the select is hidden until a model is loaded
+await page.setInputFiles('#flat-file', { name: 'cane.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(cane) });
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Picture built'), null, { timeout: 60000 });
+const caneInfo = await page.locator('#model-info').textContent();
+const caneSpin = await page.evaluate(() => document.getElementById('spin').value);
+console.log('8.', caneInfo, '| spin', caneSpin);
+if (!/standing/.test(caneInfo) || !/2 colours/.test(caneInfo)) throw new Error('the picture did not build standing with two colours');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('8b.', await page.locator('#fit-result').textContent());
+await page.screenshot({ path: join(out, '8-cane-head.png') });
+// the accessory view: the goose goes; the magnet moves to a clicked spot on the picture (along its bottom edge, since it stands)
+await page.evaluate(() => { document.getElementById('review-details').open = true; });
+await page.check('#accessory-focus');
+const caneHidden = await page.evaluate(() => window.__goose.gooseVisible);
+await page.screenshot({ path: join(out, '8c-accessory-view.png') });
+const mountBefore = await page.evaluate(() => window.__goose.mount);
+await page.click('#move-mount');
+const [mx, my] = await page.evaluate(() => window.__goose.modelOnScreen(4, -1.5, 20));
+await page.mouse.click(mx, my);
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Mount moved'), null, { timeout: 60000 });
+const mountAfter = await page.evaluate(() => window.__goose.mount);
+console.log('8c. goose hidden:', !caneHidden, '| mount', mountBefore.map((v) => v.toFixed(1)).join(','), '→', mountAfter.map((v) => v.toFixed(1)).join(','), '|', await status());
+if (caneHidden) throw new Error('the accessory view did not hide the goose');
+if (Math.abs(mountAfter[0] - mountBefore[0] - 4) > 1) throw new Error('the mount did not move to the clicked spot');
+await page.uncheck('#accessory-focus');
+await page.evaluate(() => { if (window.__goose.moveMode) document.getElementById('move-mount').click(); });
+// a flat picture on the wing, puck behind it
+await page.selectOption('#point', 'left_wing');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Picture built'), null, { timeout: 60000 });
+console.log('8d.', await page.locator('#model-info').textContent());
+if (!/flat/.test(await page.locator('#model-info').textContent())) throw new Error('the picture did not lie flat on the wing');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('8e.', await page.locator('#fit-result').textContent());
+await page.screenshot({ path: join(out, '8e-cane-wing.png') });
+
+// a small model: a thin sword gets a puck under its guard, and can then be fitted
+const sword = boxesStl([[0, 0, 0, 40, 5, 2], [10, -4.5, 0, 4, 14, 2]]);
+// the prepare settings left by the dome (flipped, 20 mm wide, filled) do not suit a sword
+await page.evaluate(() => { for (const [id, v] of [['prep-down', '-z'], ['prep-width', ''], ['prep-fill', '0']]) document.getElementById(id).value = v; });
+await page.setInputFiles('#accessory-file', { name: 'sword.stl', mimeType: 'application/octet-stream', buffer: Buffer.from(sword) });
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Puck added'), null, { timeout: 60000 });
+console.log('9.', await page.locator('#puck-info').textContent());
+await page.evaluate(() => { for (const d of document.querySelectorAll('#prepare-controls details')) d.open = true; });
+await page.selectOption('#prep-puck', 'never');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('after preparing') && !document.getElementById('status').textContent.includes('Puck'), null, { timeout: 60000 });
+const noPuck = await page.locator('#puck-info').textContent();
+await page.selectOption('#prep-puck', 'auto');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Puck added'), null, { timeout: 60000 });
+console.log('9b. toggled off:', JSON.stringify(noPuck), '| on again:', await page.locator('#puck-info').textContent());
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('9c.', await page.locator('#fit-result').textContent());
+if (/floor/.test(await page.locator('#fit-result').textContent())) throw new Error('the puck did not give the pocket a floor');
+await page.screenshot({ path: join(out, '9-sword-puck.png') });
+
+// the neck: a band appears, a bow-tie block is fitted on it with slots, and the export gives the band as its own part
+const bow = boxesStl([[-12, -4, 0, 24, 8, 4]]);
+await page.setInputFiles('#accessory-file', { name: 'bow.stl', mimeType: 'application/octet-stream', buffer: Buffer.from(bow) });
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Place it'), null, { timeout: 30000 });
+await page.selectOption('#point', 'neck');
+await page.waitForFunction(() => window.__goose.band && window.__goose.band.shown, null, { timeout: 60000 });
+const bandInfo = await page.evaluate(() => window.__goose.band);
+console.log('10. band:', JSON.stringify(bandInfo), '|', await page.locator('#neck-info').textContent());
+if (bandInfo.tabs !== 2 || bandInfo.volume < 50) throw new Error('the neck band is not right');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('10b.', await page.locator('#fit-result').textContent());
+if (!/separate part/.test(await page.locator('#fit-result').textContent())) throw new Error('the fit on the neck did not keep the band');
+await page.screenshot({ path: join(out, '10-neck-bow.png') });
+const neckFiles = [];
+page.on('download', (d) => neckFiles.push(d.suggestedFilename()));
+await page.click('#export-fitted');
+await new Promise((r) => setTimeout(r, 1500));
+console.log('10c. exported', neckFiles.join(', '));
+if (!neckFiles.includes('accessory.neck.band.stl')) throw new Error('the band was not exported as its own file');
+await page.click('.tabs button[data-tab="paint"]');
+const [neckDl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-3mf')]);
+console.log('10d.', await status(), '→', neckDl.suggestedFilename());
+await page.click('.tabs button[data-tab="accessory"]');
+await page.selectOption('#point', 'head');
+
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
 const box = await page.locator('#view canvas[data-engine]').boundingBox();
@@ -235,6 +324,25 @@ await browser.close();
 await server.close();
 if (errors.length) { console.log('console errors:\n' + errors.join('\n')); process.exit(1); }
 console.log('ok, no console errors');
+
+/** Binary STL of axis-aligned boxes [x, y, z, w, d, h], joined as one shell per box (overlaps are fine, the importer repairs). */
+function boxesStl(boxes) {
+  const tris = [];
+  for (const [x, y, z, w, d, h] of boxes) {
+    const p = (i) => [x + (i & 1 ? w : 0), y + (i & 2 ? d : 0), z + (i & 4 ? h : 0)];
+    const quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    for (const [a, b, c, dd] of quads) { tris.push([p(a), p(b), p(c)]); tris.push([p(a), p(c), p(dd)]); }
+  }
+  const buf = Buffer.alloc(84 + tris.length * 50);
+  buf.writeUInt32LE(tris.length, 80);
+  let o = 84;
+  for (const t of tris) {
+    o += 12;
+    for (const v of t) { buf.writeFloatLE(v[0], o); buf.writeFloatLE(v[1], o + 4); buf.writeFloatLE(v[2], o + 8); o += 12; }
+    o += 2;
+  }
+  return buf;
+}
 
 function puckStl(r, h, n) {
   const tris = [];

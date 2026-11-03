@@ -35,6 +35,7 @@ p { margin: 8px 0; }
 .tabs button { flex: 1; padding: 7px 4px; background: transparent; border: 1px solid transparent; color: var(--muted); border-radius: 7px; cursor: pointer; font-size: 13px; }
 .tabs button.active { color: #1b1d22; background: var(--accent); font-weight: 600; }
 .tabs button:disabled { opacity: 0.4; cursor: default; }
+.row button.active { background: #3a4050; border-color: var(--accent); color: var(--accent); }
 
 label { display: block; margin: 10px 0 0; font-size: 13px; }
 label.check { display: flex; gap: 8px; align-items: flex-start; line-height: 1.35; }
@@ -80,6 +81,7 @@ button:hover:not(:disabled) { border-color: var(--muted); }
 button.primary { background: var(--accent); color: #1b1d22; border-color: var(--accent); font-weight: 600; }
 button.primary:hover:not(:disabled) { filter: brightness(1.08); }
 button:disabled { opacity: 0.4; cursor: default; }
+.row button.active { background: #3a4050; border-color: var(--accent); color: var(--accent); }
 
 .toolbar { display: flex; gap: 4px; padding: 4px; background: var(--input); border-radius: 8px; }
 .toolbar button { flex: 1; padding: 7px 4px; background: transparent; border-color: transparent; color: var(--muted); }

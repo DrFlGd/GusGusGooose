@@ -104,7 +104,7 @@ Each phase ends with a print, not a demo: the gate on each phase is what has to 
 - **Phase 2, placement UI.** The browser app around that script: load, snap to a point, nudge with gizmos, overlap preview, Fit, export. Output: a brand-new accessory fitted without touching code.
 - **Phase 3, polish.** Whatever the first real uses ask for: embossed polarity marks, batch fitting of several accessories, minimum-thickness warnings, goose-side pocket export, the offline repair path for messy downloads.
 
-**Painting before export.** After Fit, a brush tool colours faces of the accessory in the viewer, with a palette of filament colours and a bucket fill bounded by sharp edges. STL cannot carry colour, so painted models export as 3MF, which Bambu Studio, PrusaSlicer and OrcaSlicer read as paint-on colour regions for multi-material printing (plain STL export stays for single-colour parts). Painting happens after Fit so the cut and pocket faces exist to be painted, and the brush uses the same BVH as snapping. Landing: a first brush and 3MF export in Phase 2, fill and edge-aware tools in Phase 3. Done 2026-11-03 (later): tilt as well as spin, set by rotation rings on the model or sliders, and a fill of a hollow underside that finds the cavity's floor (a hat's crown opening) and fills it to a set depth under the walls. Done 2026-11-03: a 3MF's own colours (filament slots, slicer paint, material groups) are kept as Manifold material runs through fit and wrap and come out on the export; a focus view hides the goose while painting; Split by colour turns the paint into one body per colour (a skin under each colour's faces, the rest the base colour) in one 3MF, for slicers that want parts. Done 2026-11-03 (later still): the bucket fill (connected faces of one colour, bounded by creases over a set angle), a corners tool and a text stamp, both of which work in screen space: the part is drawn once more off screen with each face's index as its colour, so the faces under the polygon or the letters are exactly the ones in view, a face counting as covered when more than half its pixels are; the eye pin channel through the head is filled and the eyes seated in the bundled goose, so a hat over the eyes no longer opens the holes; and the panel was reworked into numbered steps with a number box beside every slider.
+**Painting before export.** After Fit, a brush tool colours faces of the accessory in the viewer, with a palette of filament colours and a bucket fill bounded by sharp edges. STL cannot carry colour, so painted models export as 3MF, which Bambu Studio, PrusaSlicer and OrcaSlicer read as paint-on colour regions for multi-material printing (plain STL export stays for single-colour parts). Painting happens after Fit so the cut and pocket faces exist to be painted, and the brush uses the same BVH as snapping. Landing: a first brush and 3MF export in Phase 2, fill and edge-aware tools in Phase 3. Done 2026-11-03 (later): tilt as well as spin, set by rotation rings on the model or sliders, and a fill of a hollow underside that finds the cavity's floor (a hat's crown opening) and fills it to a set depth under the walls. Done 2026-11-03: a 3MF's own colours (filament slots, slicer paint, material groups) are kept as Manifold material runs through fit and wrap and come out on the export; a focus view hides the goose while painting; Split by colour turns the paint into one body per colour (a skin under each colour's faces, the rest the base colour) in one 3MF, for slicers that want parts. Done 2026-11-03 (later still): the bucket fill (connected faces of one colour, bounded by creases over a set angle), a corners tool and a text stamp, both of which work in screen space: the part is drawn once more off screen with each face's index as its colour, so the faces under the polygon or the letters are exactly the ones in view, a face counting as covered when more than half its pixels are; the eye pin channel through the head is plugged flush in the eye colour in the bundled goose (the printed eyes sit flush, so no domes are modelled; Jerred, 2026-11-03), so a hat over the eyes no longer opens the holes; and the panel was reworked into numbered steps with a number box beside every slider.
 
 ## Accessory models: downloaded, not generated
 
@@ -201,6 +201,48 @@ of bounds" in the boolean, erratically, depending on the exact meshes);
 3.5.4 does the same boolean in under a second, so the dependency was
 bumped. The shear is applied as an affine transform rather than a
 per-vertex warp callback, which is cheaper on large meshes.
+
+## Pictures, the neck and small models (Jerred, 2026-11-03)
+
+Prompting an AI for accessory models gave low-fidelity meshes, so the
+richer route is 2D: a picture or a vector drawing, which image models and
+clip-art sites do well, turned into a flat accessory. The image pipeline
+is vendored from Print Factory (`src/vendor/`, MIT): decode, drop the
+background by the border colour, k-means in OKLab to a few colours, clean
+the labels, trace each colour and the silhouette with marching squares,
+simplify. An SVG is parsed without the DOM and keeps one region per fill.
+`buildFlat` scales the silhouette to a width, extrudes it to a plate, and
+lets each colour into the face as an inlay (smallest regions last so
+details win), tagging each with its material so the result goes through
+fit, paint and export like an imported 3MF. The mount is a puck behind the
+plate (flat) or under its bottom edge (standing, rotated so the picture is
+vertical with its front away from the goose), or the plate itself; the
+model slides so the mount is at the origin, where the fit cuts the pocket.
+Defaults follow the point: standing on the head and facing the beak (the
+spin is set from the head-to-beak direction), flat elsewhere with the puck
+at the pole of inaccessibility of the outline; the puck's diameter is the
+magnet's plus 4 mm and its height the magnet's thickness plus 2.
+
+**The neck band.** The head is wider than the neck, so a ring cannot
+slide on; the band is a C: the neck's outline at three heights across the
+band's height, unioned, offset by the clearance and again by the wall,
+extruded, with a slot cut at the back whose width is a share of the neck's
+width (0.85 by default; the arms flex apart to snap it on). The accessory
+sits at the band's front, a synthetic magnet point whose axis is the
+forward direction, with no pocket; it is carved against the goose and the
+band as one solid, then two tabs on the band (found where the outline
+crosses the lines either side of centre, since the front is round) get
+matching slots in the accessory's back. The band is returned untouched and
+exported as its own part (a second STL, or a second part in the 3MF).
+
+**A puck for small models.** `prepareAccessory` can add a puck under the
+model at the deepest point of its outline from above (a sword's guard) and
+slide the model so that point is the origin; `holdsMagnet` probes a
+cylinder of the magnet's size plus walls at the origin and the app adds the
+puck only when that probe is not solid, unless told always or never. The
+accessory view lets any mount be moved by clicking the model: the click is
+taken into the model's frame and becomes the puck's or the picture's mount
+offset, or, for a plain model, a slide of the model over the magnet.
 
 ## Still needed from Jerred
 

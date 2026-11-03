@@ -43,6 +43,8 @@ export interface MeshPart {
   mesh: IndexedMesh;
   /** index into `materials`: the whole part is this one colour */
   material: number;
+  /** per-triangle materials, for a painted part; triangles of the part's own `material` are left plain */
+  faceMaterial?: Uint8Array;
 }
 
 /**
@@ -65,7 +67,12 @@ export function write3mfParts(parts: MeshPart[], materials: Material[], name = '
     out.push(`  <object id="${i + 2}" name="${escapeXml(part.name)}" type="model" pid="1" pindex="${part.material}">\n   <mesh>\n    <vertices>\n`);
     for (let k = 0; k < P.length; k += 3) out.push(`     <vertex x="${f(P[k])}" y="${f(P[k + 1])}" z="${f(P[k + 2])}" />\n`);
     out.push('    </vertices>\n    <triangles>\n');
-    for (let k = 0; k < T.length; k += 3) out.push(`     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" />\n`);
+    for (let k = 0; k < T.length; k += 3) {
+      const m = part.faceMaterial?.[k / 3];
+      out.push(m === undefined || m === part.material
+        ? `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" />\n`
+        : `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" pid="1" p1="${m}" />\n`);
+    }
     out.push('    </triangles>\n   </mesh>\n  </object>\n');
   });
   const whole = parts.length + 2;

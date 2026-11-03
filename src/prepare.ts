@@ -28,6 +28,14 @@ export interface PrepareOptions {
   fill?: number;
   /** centre on the footprint of the lowest `footprintDepth` mm instead of the whole bounding box */
   centre: 'bbox' | 'footprint';
+  /**
+   * a puck under the model to hold the magnet, for models too small or thin
+   * to take the pocket themselves (a sword): a cylinder let 1 mm into the
+   * underside at `at` (default: the point deepest inside the model's
+   * footprint), the model lifted by its height. The puck becomes the base and
+   * the magnet point, so the model slides to put `at` on the origin.
+   */
+  puck?: { diameter: number; height: number; at?: [number, number] };
 }
 
 export const DEFAULT_PREPARE: PrepareOptions = { down: '-z', scale: 1, centre: 'bbox' };
@@ -49,6 +57,8 @@ export interface Prepared {
   size: [number, number, number];
   /** what the fill did: how far above the model's lowest point its floor is, its depth and volume; absent when none was asked for or none fitted */
   fill?: { floor: number; depth: number; volume: number };
+  /** where the puck went, in the model's frame before it slid onto the puck */
+  puck?: { at: [number, number] };
   warnings: string[];
 }
 
@@ -85,8 +95,74 @@ export async function prepareAccessory(raw: ManifoldT, opts: PrepareOptions): Pr
   if (opts.plug && opts.plug.diameter > 0 && opts.plug.height > 0) {
     m = m.add(Manifold.cylinder(opts.plug.height, opts.plug.diameter / 2, opts.plug.diameter / 2, 96, false));
   }
+  let puck: Prepared['puck'];
+  if (opts.puck && opts.puck.diameter > 0 && opts.puck.height > 0) {
+    const at = opts.puck.at ?? footprintPole(m);
+    const r = opts.puck.diameter / 2;
+    bb = m.boundingBox();
+    const sink = Math.min(1, Math.max(0.2, (bb.max[2] - bb.min[2]) / 2));
+    const cyl = Manifold.cylinder(opts.puck.height + sink, r, r, 64, false).translate(at[0], at[1], -opts.puck.height);
+    m = m.add(cyl).translate(-at[0], -at[1], opts.puck.height);
+    puck = { at };
+  }
   bb = m.boundingBox();
-  return { solid: m, scale, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], fill, warnings };
+  return { solid: m, scale, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], fill, puck, warnings };
+}
+
+/** The point deepest inside the model's footprint (its outline seen from above), by a grid search; the footprint's centre when it has no area. */
+export function footprintPole(m: ManifoldT): [number, number] {
+  const polys = m.project().toPolygons() as [number, number][][];
+  if (!polys.length) { const bb = m.boundingBox(); return [(bb.min[0] + bb.max[0]) / 2, (bb.min[1] + bb.max[1]) / 2]; }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of polys) for (const [x, y] of p) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  const inside = (x: number, y: number) => {
+    let c = 0;
+    for (const p of polys) for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const [xi, yi] = p[i], [xj, yj] = p[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c++;
+    }
+    return c % 2 === 1;
+  };
+  const dist = (x: number, y: number) => {
+    let d = Infinity;
+    for (const p of polys) for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const [ax, ay] = p[j], [bx, by] = p[i];
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+      d = Math.min(d, Math.hypot(x - (ax + t * dx), y - (ay + t * dy)));
+    }
+    return d;
+  };
+  const steps = 40, sx = (maxX - minX) / steps, sy = (maxY - minY) / steps;
+  let best: [number, number] = [(minX + maxX) / 2, (minY + maxY) / 2], bestD = -1;
+  for (let i = 0; i <= steps; i++) for (let j = 0; j <= steps; j++) {
+    const x = minX + i * sx, y = minY + j * sy;
+    if (!inside(x, y)) continue;
+    const d = dist(x, y);
+    if (d > bestD) { bestD = d; best = [x, y]; }
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    const h = Math.max(sx, sy) / 2 ** (pass + 1);
+    for (const [ox, oy] of [[-h, 0], [h, 0], [0, -h], [0, h], [-h, -h], [h, h], [-h, h], [h, -h]]) {
+      const x = best[0] + ox, y = best[1] + oy;
+      if (!inside(x, y)) continue;
+      const d = dist(x, y);
+      if (d > bestD) { bestD = d; best = [x, y]; }
+    }
+  }
+  return best;
+}
+
+/**
+ * Whether a prepared model can hold a magnet of this size on its own: is there
+ * solid material round the origin, `diameter` plus 3 mm wide and `thickness`
+ * plus 1.5 mm tall, for the pocket and its walls? Under 90% full means no.
+ */
+export async function holdsMagnet(m: ManifoldT, diameter: number, thickness: number): Promise<boolean> {
+  const { Manifold } = await manifold();
+  const r = diameter / 2 + 1.5, h = thickness + 1.5;
+  const probe = Manifold.cylinder(h, r, r, 48, false);
+  return m.intersect(probe).volume() >= probe.volume() * 0.9;
 }
 
 /**

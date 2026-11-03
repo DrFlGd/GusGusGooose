@@ -27,7 +27,7 @@ test('a round channel open at both ends is reported as a tube, not a void', asyn
   assert.ok(Math.abs(Math.abs(t.axis[0]) - 1) < 0.05, `axis ${t.axis}`);
 });
 
-test('the eye channel is filled and the eyes seated when the goose is built', async () => {
+test('the eye channel is plugged flush in the eye colour when the goose is built', async () => {
   const { Manifold } = await manifold();
   // a head: a 20 mm block with the 3.5 mm eye channel through it along x
   const head = Manifold.cube([20, 20, 20], true).subtract(Manifold.cylinder(30, 1.75, 1.75, 48, true).rotate([0, 90, 0])).translate(50, 50, 10);
@@ -39,11 +39,10 @@ test('the eye channel is filled and the eyes seated when the goose is built', as
   const built = await buildGoose(parts, [], (s) => log.push(s), part('black.stl', fromManifold(eyes), 2, '#1a1a1a'));
   assert.ok(log.some((l) => /eyes: 2 pieces/.test(l)), log.join('\n'));
   assert.equal(built.goose.genus(), 0, 'the channel is closed');
-  const filled = 20 * 20 * 20 - head.volume(); // the channel's volume
-  assert.ok(built.goose.volume() > 8000 + 2 * 20, `volume ${built.goose.volume()} should exceed the block plus two domes (channel ${filled.toFixed(0)} mm³ filled)`);
-  // the domes stand proud of both faces
+  // the channel is filled and nothing stands proud of the faces beyond the plug's 0.3 mm lip
+  assert.ok(Math.abs(built.goose.volume() - 8000) < 30, `volume ${built.goose.volume()} should be the block's (channel filled, no domes)`);
   const bb = built.goose.boundingBox();
-  assert.ok(bb.min[0] < 40 - 2 && bb.max[0] > 60 + 2, `eyes at x ${bb.min[0]}..${bb.max[0]}`);
+  assert.ok(bb.min[0] > 40 - 0.5 && bb.max[0] < 60 + 0.5, `eyes flush at x ${bb.min[0]}..${bb.max[0]}`);
   // the eye material is a fourth... here second, colour
   assert.equal(built.colors.materials.length, 2);
   assert.equal(built.colors.materials[1].color, '#1a1a1a');

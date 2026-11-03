@@ -74,11 +74,12 @@ export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = []
 }
 
 /**
- * Seats the eye pieces: the channel through the head whose radius matches the
- * pins is filled (so it is closed for every boolean), and each eye goes into a
- * mouth of it with its pin inside and its dome standing on the surface.
- * Returns the filler and the seated eyes, or null with a note when the eyes
- * and the head do not match.
+ * Closes the eyes: the channel through the head whose radius matches the eye
+ * pins is filled with a plug in the eye colour, reaching just past each
+ * mouth, so the head is closed for every boolean and each eye shows as a
+ * black disc flush with the side of the head (the printed eyes sit flush;
+ * Jerred, 2026-11-03). The eye pieces themselves are not placed. Returns the
+ * plug, or null with a note when the eyes and the head do not match.
  */
 export async function seatEyes(goose: ManifoldT, eyes: Part, material: number, firstID: number, log = (s: string) => console.log(s)): Promise<ManifoldT[] | null> {
   const { Manifold } = await manifold();
@@ -106,14 +107,9 @@ export async function seatEyes(goose: ManifoldT, eyes: Part, material: number, f
     return [0, theta, phi] as [number, number, number];
   };
   const mid = channel.ends[0].map((v, i) => (v + channel.ends[1][i]) / 2) as [number, number, number];
-  const filler = Manifold.cylinder(channel.length, channel.radius + 0.1, channel.radius + 0.1, 48, true).rotate(toward(channel.axis)).translate(mid);
-  const out: ManifoldT[] = [filler];
-  const outward: [number, number, number][] = [channel.axis.map((v) => -v) as [number, number, number], channel.axis];
-  pins.slice(0, 2).forEach((pin, i) => {
-    const placed = pin.solid.translate([-pin.center[0], -pin.center[1], -pin.top]).rotate(toward(outward[i])).translate(channel.ends[i]);
-    out.push(placed);
-  });
-  return Promise.all(out.map((m) => retag(m, firstID, material)));
+  // 0.3 mm past each mouth, so the plug's flat ends cover the curved surface round the hole
+  const filler = Manifold.cylinder(channel.length + 0.6, channel.radius + 0.1, channel.radius + 0.1, 48, true).rotate(toward(channel.axis)).translate(mid);
+  return [await retag(filler, firstID, material)];
 }
 
 /** Re-tags every face of a manifold with one material run ID. */

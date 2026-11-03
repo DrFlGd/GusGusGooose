@@ -6,9 +6,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
-import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
+import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, spinToward, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
 import { loadModel } from '../load-model.ts';
-import { DEFAULT_PREPARE, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
+import { DEFAULT_PREPARE, holdsMagnet, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
+import { buildFlat, DEFAULT_FLAT, svgDesign, type FlatDesign, type FlatOptions } from '../flat.ts';
+import { decodeImage, traceImage } from '../vendor/trace.ts';
+import { parseSvg } from '../vendor/svg.ts';
+import { DEFAULT_NECK, fitOnNeck, makeNeckBand, type NeckBand, type NeckOptions } from '../neck.ts';
 import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, type Cavity, type GarmentOptions, type WrapOptions } from '../clothing.ts';
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
@@ -116,6 +120,23 @@ let rawName = '';
 // the loaded model's own colours (a 3MF's filament slots and paint), tracked through booleans as Manifold runs
 let modelTags: { firstID: number; count: number; fallback: number } | null = null;
 const prep: PrepareOptions = { ...DEFAULT_PREPARE };
+/** where the prepare puck goes once it has been moved by hand, in the model's frame */
+let puckAt: [number, number] | undefined;
+/** where the last prepare put the puck, in the model's frame */
+let preparedPuckAt: [number, number] | null = null;
+// a flat accessory made from a picture: the traced design, and where its mount was moved to
+let flatDesign: FlatDesign | null = null;
+let flatName = '';
+let flatMountAt: [number, number] | undefined;
+let flatResult: Awaited<ReturnType<typeof buildFlat>> | null = null;
+// the neck band, when the neck is the chosen position
+let neckBand: NeckBand | null = null;
+let neckKey = '';
+let bandObject: THREE.Mesh | null = null;
+const bandMaterial = new THREE.MeshStandardMaterial({ color: 0xf2b84b, roughness: 0.6, transparent: true, opacity: 0.9 });
+/** the band the fitted accessory was fitted to, exported with it as its own part */
+let fittedBand: ManifoldT | null = null;
+let moveMode = false;
 const markers = new THREE.Group();
 scene.add(markers);
 let pick: { point: V3; normal: V3 } | null = null;
@@ -205,27 +226,49 @@ function renderGooseColours() {
 }
 
 // ---------- magnet points ----------
+/** The point the accessory is placed on: a magnet void, or the front of the neck band. */
+const currentPoint = (): MagnetVoid | undefined => (activePoint === 'neck' ? neckBand?.point : profile.points[activePoint]);
 function renderPoints() {
   markers.clear();
   const list = $('points');
   list.innerHTML = '';
   const select = $<HTMLSelectElement>('point');
   select.innerHTML = '';
+  const neckLi = document.createElement('li');
+  neckLi.innerHTML = '<b>neck</b>a press-fit band round the neck, no magnet';
+  neckLi.classList.toggle('active', activePoint === 'neck');
+  neckLi.onclick = () => { activePoint = 'neck'; select.value = 'neck'; onPointChange(); };
+  const neckOpt = document.createElement('option');
+  neckOpt.value = 'neck'; neckOpt.textContent = 'neck (band)';
   for (const [name, p] of Object.entries(profile.points)) {
     const li = document.createElement('li');
     const shape = p.shape === 'box' && p.size ? `${p.size[0].toFixed(1)} × ${p.size[1].toFixed(1)} block` : `${p.diameter.toFixed(1)} dia`;
     li.innerHTML = `<b>${name}</b>${shape} × ${p.depth.toFixed(1)} mm, ${p.mode ?? 'open'}${p.skin ? ` under ${p.skin.toFixed(1)} mm` : ''}`;
     li.classList.toggle('active', name === activePoint);
-    li.onclick = () => { activePoint = name; select.value = name; renderPoints(); updatePreview(); };
+    li.onclick = () => { activePoint = name; select.value = name; onPointChange(); };
     list.appendChild(li);
     const opt = document.createElement('option');
     opt.value = name; opt.textContent = name;
     select.appendChild(opt);
     markers.add(marker(p, name === activePoint));
   }
+  list.appendChild(neckLi);
+  select.appendChild(neckOpt);
   if (!activePoint && Object.keys(profile.points).length) { activePoint = Object.keys(profile.points)[0]; renderPoints(); return; }
   select.value = activePoint;
+  $('neck-panel').classList.toggle('hidden', activePoint !== 'neck');
+  $('pocket-details').classList.toggle('hidden', activePoint === 'neck');
   pointHint();
+  ensureBand();
+}
+/** After the point changes: the fit is stale, a picture is rebuilt for the new place, the preview moves. */
+function onPointChange() {
+  clearFitted();
+  renderPoints();
+  flatMountAt = undefined; // a moved mount belongs to the place it was moved at
+  if (flatDesign) buildFlatNow();
+  else if (rawModel && $<HTMLSelectElement>('prep-puck').value !== 'never') applyPrepare();
+  else updatePreview();
 }
 
 function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
@@ -240,11 +283,13 @@ function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
 
 // ---------- accessory ----------
 // sensible widths for a model at each point, mm, shown as the placeholder
-const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16 };
+const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24 };
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 let loadSerial = 0;
 /** Loads a model as the accessory; from the Clothing tab (`stay`) it is shown there as the wrap ghost instead of switching tabs. */
 async function loadFile(file: File, stay = false) {
+  if (IMAGE_FILE.test(file.name)) return loadFlat(file);
   status(`Reading ${file.name}…`);
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
@@ -252,6 +297,7 @@ async function loadFile(file: File, stay = false) {
     loaded = await loadModel(file.name, await file.arrayBuffer(), { repair: $<HTMLInputElement>('repair-import').checked, voxel: voxel === '' ? undefined : Number(voxel) });
     rawModel = loaded.solid;
     rawName = file.name;
+    flatDesign = null; flatResult = null; flatMountAt = undefined; puckAt = undefined;
     // a 3MF's colours become the palette, so they come through to the paint tab and the export
     if (loaded.materials && loaded.firstID !== undefined) {
       modelTags = { firstID: loaded.firstID, count: loaded.materials.length, fallback: loaded.fallback ?? 0 };
@@ -290,6 +336,9 @@ function clearModel() {
   clearFitted();
   rawModel = null;
   rawName = '';
+  flatDesign = null; flatResult = null; flatMountAt = undefined; puckAt = undefined; preparedPuckAt = null;
+  $('flat-info').textContent = '';
+  $('puck-info').textContent = '';
   if (modelTags) { modelTags = null; setPalette(DEFAULT_PALETTE); }
   baseManifold = null;
   accessoryManifold = null;
@@ -298,7 +347,7 @@ function clearModel() {
   loadSerial++;
   if (accessoryObject) { accessoryPivot.remove(accessoryObject); accessoryObject.geometry.dispose(); accessoryObject = null; gizmo.detach(); }
   if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost = null; cropKey = ''; }
-  for (const id of ['accessory-file', 'cloth-file']) $<HTMLInputElement>(id).value = ''; // so the same file can be loaded again
+  for (const id of ['accessory-file', 'cloth-file', 'flat-file']) $<HTMLInputElement>(id).value = ''; // so the same file can be loaded again
   $('prepare-controls').classList.add('hidden');
   $('accessory-controls').classList.add('hidden');
   $('model-info').textContent = '';
@@ -311,7 +360,7 @@ function clearModel() {
 }
 /** The Clear buttons are live when there is something to clear: a loaded model or a fitted part. */
 function updateClearButtons() {
-  const something = !!rawModel || !!fittedObject;
+  const something = !!rawModel || !!flatDesign || !!fittedObject;
   for (const id of ['clear-model', 'clear-cloth']) {
     const b = $<HTMLButtonElement>(id);
     b.disabled = !something;
@@ -335,12 +384,26 @@ async function applyPrepare() {
   prep.fill = fillDepth > 0 ? fillDepth : undefined;
   if (prep.fill) { status('Filling the hollow underside…'); await new Promise((r) => setTimeout(r, 20)); }
   try {
-    const prepared = await prepareAccessory(rawModel, prep);
+    // the puck: always, never, or when the model on its own has no room for the pocket at the magnet
+    const puckMode = activePoint === 'neck' ? 'never' : $<HTMLSelectElement>('prep-puck').value;
+    const magnet = magnetSize();
+    const puck = { diameter: Number($<HTMLInputElement>('prep-puck-d').value) || magnet.diameter + 4, height: Number($<HTMLInputElement>('prep-puck-h').value) || magnet.puckHeight, at: puckAt };
+    prep.puck = puckMode === 'always' ? puck : undefined;
+    let prepared = await prepareAccessory(rawModel, prep);
+    let puckNote = '';
+    if (puckMode === 'auto') {
+      if (await holdsMagnet(prepared.solid, magnet.diameter, magnet.thickness)) puckNote = 'The model has room for the magnet; no puck added.';
+      else { prep.puck = puck; prepared = await prepareAccessory(rawModel, prep); }
+    }
+    preparedPuckAt = prepared.puck?.at ?? null;
+    if (prepared.puck) puckNote = `Puck ${prep.puck!.diameter.toFixed(1)} × ${prep.puck!.height.toFixed(1)} mm under (${prepared.puck.at.map((v) => v.toFixed(1)).join(', ')}) of the model; it is the base now.`;
+    else if (puckMode === 'never') puckNote = '';
+    $('puck-info').textContent = puckNote;
     accessoryManifold = prepared.solid;
     accessoryMesh = fromManifold(prepared.solid);
     const size = prepared.size.map((v) => v.toFixed(1)).join(' × ');
     const fill = prepared.fill ? ` Filled ${prepared.fill.volume.toFixed(0)} mm³, ${prepared.fill.depth.toFixed(1)} mm deep from a floor ${prepared.fill.floor.toFixed(1)} mm above the lowest point.` : '';
-    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}.${fill}${prepared.warnings.length ? ` ${prepared.warnings.join('; ')}.` : ''} Place it, then Fit.`);
+    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}.${fill}${prepared.puck ? ' Puck added underneath.' : ''}${prepared.warnings.length ? ` ${prepared.warnings.join('; ')}.` : ''} Place it, then Fit.`);
   } catch (err) {
     status(`Prepare failed: ${(err as Error).message}`);
     return;
@@ -367,8 +430,126 @@ $<HTMLInputElement>('accessory-file').onchange = (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (file) loadFile(file);
 };
-for (const id of ['prep-down', 'prep-width', 'prep-scale', 'prep-centre', 'prep-plug-d', 'prep-plug-h', 'prep-fill']) {
+for (const id of ['prep-down', 'prep-width', 'prep-scale', 'prep-centre']) {
+  $<HTMLInputElement>(id).onchange = () => { puckAt = undefined; applyPrepare(); }; // the model's frame changes, so a moved puck starts over
+}
+for (const id of ['prep-plug-d', 'prep-plug-h', 'prep-fill', 'prep-puck', 'prep-puck-d', 'prep-puck-h']) {
   $<HTMLInputElement>(id).onchange = () => { applyPrepare(); };
+}
+/**
+ * The magnet the pocket is cut for: the pocket boxes when typed, else the point's own void (a box by its diagonal);
+ * and the puck height that leaves a floor under its pocket, which starts a sink above the base.
+ */
+function magnetSize(): { diameter: number; thickness: number; puckHeight: number } {
+  const pt = currentPoint();
+  const d = Number($<HTMLInputElement>('pocket-dia').value), t = Number($<HTMLInputElement>('pocket-thick').value);
+  const voidD = pt ? (pt.shape === 'box' && pt.size ? Math.hypot(...pt.size) : pt.diameter) : 10;
+  const thickness = t || profile.magnetThickness || pt?.depth || 3;
+  const sink = Number($<HTMLInputElement>('sink').value) || 0;
+  return { diameter: d || voidD, thickness, puckHeight: Math.round((thickness + sink + 1.5) * 2) / 2 };
+}
+
+// ---------- flat accessories from a picture ----------
+/** Reads a picture or SVG as a design and builds it. */
+async function loadFlat(file: File) {
+  status(`Tracing ${file.name}…`);
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    let design: FlatDesign;
+    if (/\.svg$/i.test(file.name)) {
+      const doc = parseSvg(await file.text());
+      const shapes = doc.shapes.filter((sh) => sh.fill !== 'none');
+      if (!shapes.length) throw new Error('no filled shapes in the SVG');
+      // SVG y runs down the page; the design wants it up
+      design = svgDesign(shapes.map((sh) => ({ ...sh, contours: sh.contours.map((c) => c.map((v, i) => (i % 2 ? -v : v))) })));
+      $('flat-info').textContent = `${file.name}: ${shapes.length} shape${shapes.length === 1 ? '' : 's'}, ${design.regions.length} colour${design.regions.length === 1 ? '' : 's'}.`;
+    } else {
+      const img = await decodeImage(file);
+      const colors = Math.max(1, Math.min(8, Number($<HTMLInputElement>('flat-colors').value) || 3));
+      const t = traceImage(img, { colors, background: $<HTMLInputElement>('flat-background').checked ? {} : false });
+      if (!t.silhouette.length && !t.regions.length) throw new Error('nothing to trace: the picture is empty or all background');
+      design = { width: t.width, height: t.height, silhouette: t.silhouette, regions: t.regions.map((r) => ({ color: r.color, contours: r.contours })) };
+      $('flat-info').textContent = `${file.name}: ${img.width} × ${img.height} px, ${design.regions.length} colour${design.regions.length === 1 ? '' : 's'} kept.`;
+    }
+    flatDesign = design;
+    flatName = file.name;
+    flatMountAt = undefined;
+    rawModel = null; rawName = ''; puckAt = undefined;
+    $('prepare-controls').classList.add('hidden');
+    $('model-info').textContent = '';
+    $<HTMLButtonElement>('wrap-garment').disabled = true;
+    $<HTMLDetailsElement>('flat-panel').open = true;
+    setTab('accessory');
+    await buildFlatNow();
+  } catch (err) {
+    status(`${file.name}: ${(err as Error).message}`);
+  }
+}
+/** Options from the picture panel; auto choices follow the chosen point. */
+function flatOptions(): FlatOptions {
+  const num = (id: string, d: number) => { const v = Number($<HTMLInputElement>(id).value); return v > 0 ? v : d; };
+  let orientation = $<HTMLSelectElement>('flat-orientation').value as 'auto' | 'flat' | 'standing';
+  if (orientation === 'auto') orientation = activePoint === 'head' ? 'standing' : 'flat';
+  let kind = $<HTMLSelectElement>('flat-mount').value as FlatOptions['mount']['kind'];
+  if (activePoint === 'neck') kind = 'none'; // the band holds it
+  const magnet = magnetSize();
+  return {
+    width: num('flat-width', DEFAULT_FLAT.width),
+    depth: num('flat-depth', DEFAULT_FLAT.depth),
+    inlayDepth: Math.max(0, Number($<HTMLInputElement>('flat-inlay').value) || 0),
+    sides: $<HTMLSelectElement>('flat-sides').value as FlatOptions['sides'],
+    margin: Math.max(0, Number($<HTMLInputElement>('flat-margin').value) || 0),
+    fillHoles: $<HTMLInputElement>('flat-fill-holes').checked,
+    mount: { kind, orientation, at: flatMountAt, diameter: num('flat-puck-d', magnet.diameter + 4), height: num('flat-puck-h', magnet.puckHeight) },
+  };
+}
+let flatSerial = 0;
+/** Builds the picture into the accessory with the current options and shows it. */
+async function buildFlatNow() {
+  if (!flatDesign) return;
+  const serial = ++flatSerial;
+  const opts = flatOptions();
+  status('Building the picture…');
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    const r = await buildFlat(flatDesign, opts);
+    if (serial !== flatSerial) return;
+    flatResult = r;
+    accessoryManifold = r.solid;
+    accessoryMesh = fromManifold(r.solid);
+    modelTags = { firstID: r.firstID, count: r.materials.length, fallback: 0 };
+    setPalette([...r.materials, ...DEFAULT_PALETTE.slice(1).filter((d) => !r.materials.some((m) => m.color === d.color))]);
+    baseManifold = null;
+    loadSerial++;
+    // a picture standing on the head faces the beak; one on the band is upright already
+    const pt = currentPoint();
+    if (opts.mount.orientation === 'standing' && pt && pt.axis[2] > 0.5) {
+      const spin = Math.round(spinToward(pt.axis, [0, -1], forwardOnGoose()));
+      $<HTMLInputElement>('spin').value = String(spin);
+    }
+    const mount = opts.mount.kind === 'none' ? 'no magnet mount' : opts.mount.kind === 'plate' ? 'magnet in the plate' : `${opts.mount.diameter.toFixed(1)} × ${opts.mount.height.toFixed(1)} mm puck ${opts.mount.orientation === 'standing' ? 'under the bottom edge' : 'behind'} at (${r.mountAt.map((v) => v.toFixed(1)).join(', ')})`;
+    const size = `${r.size[0].toFixed(1)} × ${r.size[1].toFixed(1)} × ${opts.depth} mm`;
+    $('model-info').textContent = `${flatName}: ${size}, ${r.materials.length} colour${r.materials.length === 1 ? '' : 's'}, ${opts.mount.orientation}, ${mount}.`;
+    status(`Picture built: ${size}, ${opts.mount.orientation}.${r.warnings.length ? ` ${r.warnings.join('; ')}.` : ''} Place it, then Fit.`);
+    showAccessory();
+  } catch (err) {
+    status(`Picture failed: ${(err as Error).message}`);
+  }
+}
+/** The goose's forward direction in the plane: from the head point to the beak point. */
+function forwardOnGoose(): V3 {
+  const h = profile.points.head, b = profile.points.beak;
+  if (!h || !b) return [0, -1, 0];
+  const dx = b.center[0] - h.center[0], dy = b.center[1] - h.center[1], l = Math.hypot(dx, dy) || 1;
+  return [dx / l, dy / l, 0];
+}
+$<HTMLInputElement>('flat-file').onchange = (e) => {
+  const f = (e.target as HTMLInputElement).files?.[0];
+  if (f) loadFlat(f);
+};
+for (const id of ['flat-colors', 'flat-background']) $<HTMLInputElement>(id).onchange = () => { if (flatDesign) status('Choose the picture again to trace it with the new colour settings.'); };
+for (const id of ['flat-width', 'flat-depth', 'flat-inlay', 'flat-sides', 'flat-margin', 'flat-fill-holes', 'flat-orientation', 'flat-mount', 'flat-puck-d', 'flat-puck-h']) {
+  $<HTMLInputElement>(id).onchange = () => { if (id === 'flat-orientation' || id === 'flat-width') flatMountAt = undefined; if (flatDesign) buildFlatNow(); };
 }
 // drag a file anywhere onto the page
 for (const ev of ['dragenter', 'dragover']) document.addEventListener(ev, (e) => { e.preventDefault(); view.classList.add('drop'); });
@@ -396,7 +577,7 @@ async function generateBase(): Promise<ManifoldT> {
   const shape = $<HTMLSelectElement>('gen-shape').value;
   const w = Number($<HTMLInputElement>('gen-w').value);
   const h = Number($<HTMLInputElement>('gen-h').value);
-  const pt = profile.points[activePoint];
+  const pt = activePoint === 'neck' ? undefined : profile.points[activePoint];
   const minW = pt ? (pt.shape === 'box' && pt.size ? Math.hypot(...pt.size) : pt.diameter) + 3 : 0;
   if (w < minW) status(`Note: ${w} mm is narrower than the ${minW.toFixed(1)} mm this magnet needs with 1.5 mm walls.`);
   switch (shape) {
@@ -521,7 +702,7 @@ const FIT_PRESETS: Record<string, { radial: number; axial: number; ribs: boolean
 function updatePreview() {
   for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'clearance']) syncSlider(id);
   if (!accessoryObject) return;
-  const pt = profile.points[activePoint];
+  const pt = currentPoint();
   if (!pt) return;
   const pl = placement();
   const origin: V3 = [pt.center[0] - pt.axis[0] * pl.sink, pt.center[1] - pt.axis[1] * pl.sink, pt.center[2] - pt.axis[2] * pl.sink];
@@ -548,7 +729,7 @@ gizmo.setSize(0.9);
 scene.add(gizmo.getHelper());
 gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !(e as unknown as { value: boolean }).value; });
 gizmo.addEventListener('objectChange', () => {
-  const pt = profile.points[activePoint];
+  const pt = currentPoint();
   if (!pt) return;
   const pl = placement();
   const origin: V3 = [pt.center[0] - pt.axis[0] * pl.sink, pt.center[1] - pt.axis[1] * pl.sink, pt.center[2] - pt.axis[2] * pl.sink];
@@ -571,7 +752,7 @@ function showGizmo(on: boolean) {
 for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial', 'pocket-none', 'pocket-ribs', 'pocket-rib-count', 'pocket-rib-crush']) {
   $<HTMLInputElement>(id).onchange = clearFitted;
 }
-$<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTMLSelectElement).value; clearFitted(); renderPoints(); updatePreview(); };
+$<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTMLSelectElement).value; onPointChange(); };
 function pointHint() {
   const w = POINT_WIDTH[activePoint];
   const input = $<HTMLInputElement>('prep-width');
@@ -582,6 +763,7 @@ function pointHint() {
 function clearFitted() {
   if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); fittedObject = null; }
   fitted = null;
+  fittedBand = null;
   paint = null;
   $<HTMLButtonElement>('export-fitted').disabled = true;
   $<HTMLButtonElement>('export-cloth').disabled = true;
@@ -634,11 +816,20 @@ $('fit').onclick = async () => {
   try {
     profile.clearance = Number($<HTMLInputElement>('clearance').value);
     const t0 = performance.now();
-    fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, placement());
+    if (activePoint === 'neck') {
+      const band = await ensureBand();
+      if (!band) throw new Error('the neck band could not be made');
+      const { point: _p, pocket: _k, ...rest } = placement();
+      const r = await fitOnNeck(gooseManifold, accessoryManifold, profile, band, rest, neckOptions());
+      fitted = r;
+      fittedBand = r.band;
+    } else {
+      fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, placement());
+    }
     const tagged = modelTags ? fromManifoldTagged(fitted.solid, modelTags.firstID, modelTags.count, modelTags.fallback) : null;
     showFitted(fitted.mesh, tagged?.faceMaterial);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    $('fit-result').textContent = `Fitted in ${secs} s: ${fitted.volumeBefore.toFixed(0)} → ${fitted.volumeAfter.toFixed(0)} mm³, ${fitted.bodies} body.` + (fitted.warnings.length ? ` Warnings: ${fitted.warnings.join('; ')}` : '');
+    $('fit-result').textContent = `Fitted in ${secs} s: ${fitted.volumeBefore.toFixed(0)} → ${fitted.volumeAfter.toFixed(0)} mm³, ${fitted.bodies} body.` + (fittedBand ? ' The band is a separate part: Export gives both.' : '') + (fitted.warnings.length ? ` Warnings: ${fitted.warnings.join('; ')}` : '');
     $<HTMLButtonElement>('export-fitted').disabled = false;
     status('Fit done. Export or adjust and fit again.');
   } catch (err) {
@@ -648,7 +839,11 @@ $('fit').onclick = async () => {
   }
 };
 
-const exportStl = () => { if (paint) download(`accessory.${activePoint}.fitted.stl`, serializeStl(paint.mesh)); };
+const exportStl = () => {
+  if (!paint) return;
+  download(`accessory.${activePoint}.fitted.stl`, serializeStl(paint.mesh));
+  if (fittedBand) setTimeout(() => download('accessory.neck.band.stl', serializeStl(fromManifold(fittedBand!))), 300);
+};
 $('export-fitted').onclick = exportStl;
 $('export-fitted-2').onclick = exportStl;
 
@@ -711,6 +906,13 @@ $('export-3mf').onclick = () => {
   if (!paint) return;
   const used = new Set(paint.faceMaterial);
   const names = palette.filter((_, i) => used.has(i)).map((m) => m.name).join(', ');
+  if (fittedBand) {
+    // the painted accessory and the band as two parts of one object
+    const parts = [{ name: 'Accessory', mesh: paint.mesh, material: 0, faceMaterial: paint.faceMaterial }, { name: 'Neck band', mesh: fromManifold(fittedBand), material: 0 }];
+    download(`${exportName()}.3mf`, write3mfParts(parts, palette, `goose ${activePoint} accessory`));
+    status(`3MF exported with colours: ${names}, and the neck band as a second part.`);
+    return;
+  }
   download(`${exportName()}.3mf`, write3mf(paint.mesh, palette, paint.faceMaterial, `goose ${activePoint} accessory`));
   status(`3MF exported with colours: ${names}. Map them to filaments in your slicer.`);
 };
@@ -726,6 +928,7 @@ $('export-split').onclick = async () => {
     const t0 = performance.now();
     const r = await splitByMaterial(paint.mesh, paint.faceMaterial, palette.length, { depth });
     const parts = r.parts.map((p) => ({ name: palette[p.material].name, mesh: p.mesh, material: p.material }));
+    if (fittedBand) parts.push({ name: 'Neck band', mesh: fromManifold(fittedBand), material: 0 });
     download(`${exportName()}.parts.3mf`, write3mfParts(parts, palette, `goose ${activePoint} accessory`));
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('split-info').textContent = `${parts.length} parts in ${secs} s: ${r.parts.map((p) => `${palette[p.material].name} ${p.volume.toFixed(0)} mm³`).join(', ')}.` + (r.warnings.length ? ` ${r.warnings.join('; ')}.` : '');
@@ -738,16 +941,17 @@ $('export-split').onclick = async () => {
 };
 renderPalette();
 
-// ---------- focus view: the goose and its markers out of the way, the camera on the painted part ----------
-const focusOn = () => tab === 'paint' && $<HTMLInputElement>('paint-focus').checked;
+// ---------- focus view: the goose and its markers out of the way, the camera on the accessory ----------
+const focusOn = () => (tab === 'paint' && $<HTMLInputElement>('paint-focus').checked) || (tab === 'accessory' && $<HTMLInputElement>('accessory-focus').checked);
 let savedView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
-/** Hides or shows everything that is not the fitted part. */
+/** Hides or shows everything that is not the accessory (fitted or placed). */
 function applyFocus() {
-  const on = focusOn() && !!fittedObject;
+  const on = focusOn() && !!(fittedObject || (accessoryObject && accessoryObject.visible));
   if (gooseObject) gooseObject.visible = !on;
   markers.visible = !on;
   if (pickMarker) pickMarker.visible = !on;
   grid.visible = !on;
+  if (bandObject) bandObject.visible = !on && activePoint === 'neck';
   if (on) {
     if (!savedView) savedView = { position: camera.position.clone(), target: controls.target.clone() };
     frameFitted();
@@ -757,10 +961,11 @@ function applyFocus() {
     savedView = null;
   }
 }
-/** Moves the camera, keeping its direction, so the fitted part fills the view. */
+/** Moves the camera, keeping its direction, so the accessory fills the view. */
 function frameFitted() {
-  if (!fittedObject) return;
-  const box = new THREE.Box3().setFromObject(fittedObject);
+  const target = fittedObject ?? (accessoryObject && accessoryObject.visible ? accessoryPivot : null);
+  if (!target) return;
+  const box = new THREE.Box3().setFromObject(target);
   const centre = box.getCenter(new THREE.Vector3());
   const radius = box.getSize(new THREE.Vector3()).length() / 2;
   const dir = camera.position.clone().sub(controls.target).normalize();
@@ -769,6 +974,43 @@ function frameFitted() {
   camera.position.copy(centre).addScaledVector(dir, Math.max(dist, 20));
 }
 $<HTMLInputElement>('paint-focus').onchange = applyFocus;
+$<HTMLInputElement>('accessory-focus').onchange = applyFocus;
+
+// ---------- moving the magnet: a click on the model says where it should be ----------
+function setMoveMode(on: boolean) {
+  moveMode = on;
+  $('move-mount').classList.toggle('active', on);
+  $('move-mount').textContent = on ? 'Click the model where the magnet goes (Esc stops)' : 'Move the magnet: click the model';
+  if (on) showGizmo(false);
+}
+$('move-mount').onclick = () => setMoveMode(!moveMode);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && moveMode) setMoveMode(false); });
+/** Puts the magnet under a world point on the accessory: the puck or the picture's mount moves there, or a plain model slides. */
+async function moveMountTo(world: THREE.Vector3) {
+  accessoryPivot.updateMatrixWorld(true);
+  const p = accessoryPivot.worldToLocal(world.clone());
+  const pl = placement();
+  const dx = p.x - pl.offset[0], dy = p.y - pl.offset[1]; // in the model's own frame, from the magnet at its origin
+  if (flatDesign && flatResult) {
+    const o = flatOptions();
+    if (o.mount.kind === 'none') { status('This picture has no magnet mount; choose a puck or the plate first.'); return; }
+    flatMountAt = o.mount.orientation === 'standing' ? [flatResult.mountAt[0] + dx, flatResult.mountAt[1]] : [flatResult.mountAt[0] + dx, flatResult.mountAt[1] + dy];
+    await buildFlatNow();
+    status(`Mount moved to (${flatMountAt.map((v) => v.toFixed(1)).join(', ')}) on the picture. Fit again.`);
+  } else if (rawModel && preparedPuckAt) {
+    puckAt = [preparedPuckAt[0] + dx, preparedPuckAt[1] + dy];
+    await applyPrepare();
+    status(`Puck moved under (${puckAt.map((v) => v.toFixed(1)).join(', ')}) of the model. Fit again.`);
+  } else if (accessoryObject) {
+    const clamp = (v: number) => Math.max(-30, Math.min(30, Math.round(v * 2) / 2));
+    $<HTMLInputElement>('dx').value = String(clamp(pl.offset[0] - dx));
+    $<HTMLInputElement>('dy').value = String(clamp(pl.offset[1] - dy));
+    clearFitted();
+    updatePreview();
+    status('The model slid so that spot sits over the magnet. Fit again.');
+  }
+}
+
 
 let painting = false;
 function paintAt(e: PointerEvent) {
@@ -933,7 +1175,7 @@ function setTab(name: string) {
   guides.visible = name === 'clothing';
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   applyFocus();
-  if (name !== 'accessory') showGizmo(false);
+  if (name !== 'accessory') { showGizmo(false); setMoveMode(false); }
   drawOverlay();
   // in paint mode the left button paints and the right button orbits
   controls.mouseButtons = name === 'paint'
@@ -953,6 +1195,55 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   if (tab === 'paint' && (paintTool === 'text' || paintTool === 'corners')) { hover = local(e); drawOverlay(); }
 });
 window.addEventListener('pointerup', () => { painting = false; });
+
+// ---------- the neck band ----------
+function neckOptions(): NeckOptions {
+  const num = (id: string, d: number) => { const v = Number($<HTMLInputElement>(id).value); return Number.isFinite(v) && $<HTMLInputElement>(id).value !== '' ? v : d; };
+  return {
+    height: num('neck-height', DEFAULT_NECK.height),
+    bandHeight: num('neck-band-h', DEFAULT_NECK.bandHeight),
+    thickness: num('neck-thick', DEFAULT_NECK.thickness),
+    clearance: num('neck-clear', DEFAULT_NECK.clearance),
+    opening: num('neck-opening', DEFAULT_NECK.opening),
+    attach: $<HTMLSelectElement>('neck-attach').value as NeckOptions['attach'],
+    tabDiameter: num('neck-tab-d', DEFAULT_NECK.tabDiameter),
+    tabLength: num('neck-tab-l', DEFAULT_NECK.tabLength),
+    tabSpacing: num('neck-tab-s', DEFAULT_NECK.tabSpacing),
+    tabClearance: DEFAULT_NECK.tabClearance,
+  };
+}
+let bandPending: Promise<NeckBand | null> | null = null;
+/** Builds the band for the current options when the neck is the chosen point (once per set of options), and shows it. */
+function ensureBand(): Promise<NeckBand | null> {
+  if (activePoint !== 'neck' || !gooseManifold) { if (bandObject) bandObject.visible = false; return Promise.resolve(null); }
+  const o = neckOptions();
+  const key = JSON.stringify(o);
+  if (key === neckKey && neckBand) { if (bandObject) bandObject.visible = !focusOn(); return Promise.resolve(neckBand); }
+  if (key === neckKey && bandPending) return bandPending;
+  neckKey = key;
+  clearFitted();
+  bandPending = makeNeckBand(gooseManifold, profile, o).then((b) => {
+    if (key !== neckKey) return neckBand;
+    neckBand = b;
+    if (bandObject) { scene.remove(bandObject); bandObject.geometry.dispose(); }
+    bandObject = new THREE.Mesh(toGeometry(fromManifold(b.band)), bandMaterial);
+    bandObject.visible = activePoint === 'neck' && !focusOn();
+    scene.add(bandObject);
+    $('neck-info').textContent = `Neck ${b.neckWidth.toFixed(1)} mm across here, opening ${b.openingWidth.toFixed(1)} mm at the back${b.tabs.length ? `, ${b.tabs.length} tabs` : ''}.${b.warnings.length ? ` ${b.warnings.join('; ')}.` : ''}`;
+    updatePreview();
+    return b;
+  }).catch((err) => { status(`Band failed: ${(err as Error).message}`); $('neck-info').textContent = (err as Error).message; return null; });
+  return bandPending;
+}
+let bandTimer = 0;
+for (const id of ['neck-height', 'neck-band-h', 'neck-thick', 'neck-clear', 'neck-opening', 'neck-attach', 'neck-tab-d', 'neck-tab-l', 'neck-tab-s']) {
+  $<HTMLInputElement>(id).addEventListener('input', () => {
+    syncSlider('neck-height'); syncSlider('neck-opening');
+    $('neck-tab-row').classList.toggle('hidden', $<HTMLSelectElement>('neck-attach').value !== 'tabs');
+    clearTimeout(bandTimer);
+    bandTimer = window.setTimeout(() => { ensureBand(); }, 150);
+  });
+}
 
 // ---------- clothing ----------
 // two rings on the goose mark the hem and neck heights
@@ -1097,6 +1388,16 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     }
     return;
   }
+  if (tab === 'accessory' && moveMode && e.button === 0 && (fittedObject || accessoryObject)) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    const target = fittedObject ?? accessoryObject!;
+    const hit = raycaster.intersectObject(target)[0];
+    if (!hit) { status('Click on the model to put the magnet there.'); return; }
+    moveMountTo(hit.point);
+    return;
+  }
   if (tab === 'accessory' && accessoryObject && accessoryObject.visible && !gizmo.dragging) {
     const rect = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
@@ -1169,6 +1470,20 @@ function download(name: string, bytes: Uint8Array) {
   get profile() { return profile; },
   get gooseVisible() { return gooseObject.visible; },
   get ringsShown() { return !!gizmo.object; },
+  get band() { return neckBand ? { width: neckBand.neckWidth, opening: neckBand.openingWidth, tabs: neckBand.tabs.length, volume: neckBand.band.volume(), shown: !!bandObject && bandObject.visible } : null; },
+  get mount() { return flatResult ? flatResult.mountAt : preparedPuckAt; },
+  get moveMode() { return moveMode; },
+  lookAt(target: V3, position: V3) { controls.target.set(...target); camera.position.set(...position); controls.update(); },
+  get camera() { return { position: camera.position.toArray(), target: controls.target.toArray() }; },
+  modelOnScreen(dx: number, dy: number, dz: number) {
+    // a point given in the model's own frame, as the view shows it
+    accessoryPivot.updateMatrixWorld(true);
+    const off = placement().offset;
+    const w = accessoryPivot.localToWorld(new THREE.Vector3(dx + off[0], dy + off[1], dz));
+    const v = w.project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height];
+  },
   showRings(on: boolean) { showGizmo(on); },
   setPaintTool(t: string) { setPaintTool(t as PaintTool); },
   faceAt(x: number, y: number) { return faceAt(x, y); },

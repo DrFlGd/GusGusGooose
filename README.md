@@ -56,8 +56,9 @@ from their size or one you set (down to 0.3 mm for more detail, at the
 cost of a longer wait); the Clear buttons on the Accessory and Clothing
 tabs drop the loaded model and anything fitted, to start over.
 `npm run smoke` builds it and drives it headlessly (fit a puck, import a
-3MF, make a shirt, wrap it, clear, cut a hole; screenshots in
-`smoke-out/`); it needs Playwright with Chromium available.
+3MF, make a shirt, wrap it, clear, build a picture on the head and a wing
+and move its mount, puck a sword, fit a bow on the neck band, cut a hole;
+screenshots in `smoke-out/`); it needs Playwright with Chromium available.
 
 On the Accessory tab, a hollow model (a hat open underneath) can be filled
 before the fit: the fill finds the cavity the walls enclose above the magnet
@@ -67,6 +68,39 @@ whose brim dips below the crown opening still gets its magnet in the crown.
 The model's angle is set by clicking it in the view, which shows three
 rotation rings (two tilts and the spin about the magnet axis) to drag, with
 sliders in the panel for fine adjustment; the fit uses the same angles.
+
+A picture makes an accessory too: drop a PNG, JPG or SVG on the view (or
+choose it under "make a flat accessory from a picture"). The picture is
+traced (an SVG keeps its fills; a photo is reduced to a few colours with
+the background dropped), its outline becomes a plate of the thickness you
+set, and each colour an inlay let into the face (or both faces), so a
+candy cane prints red with white stripes. The magnet goes in a puck behind
+the plate, or in the plate itself, sized to the point's magnet; on the head
+the picture stands up on its bottom edge with the puck under it, facing
+the beak, and on a wing or the beak it lies flat with the puck under the
+deepest point of the outline. A margin grows the outline and joins loose
+pieces; holes can be filled. The tracing and SVG code is vendored from the
+Print Factory project (MIT, `src/vendor/`).
+
+The neck is a fourth place to wear things, with no magnet: choosing it
+builds a press-fit band (a C that clips round the neck from the front,
+with an opening at the back you can widen or narrow, at a height you set)
+and shows it on the goose. The accessory, a bow tie, a scarf knot, a
+picture, sits on the band's front and is carved against the goose and
+the band together; two tabs on the band go into slots cut in its back
+(or leave it flat for glue). The band stays its own part: Export STL gives
+both files, and the Paint tab's 3MF carries the band as a second part.
+
+The accessory view (under Place) hides the goose and frames the model,
+fitted or not, to look it over, and "Move the magnet" puts the magnet
+where you click: a puck moves under the spot, a picture's mount moves to
+it, and a plain model slides so the spot sits over the magnet. Small
+models that cannot hold the magnet themselves (a sword, a 2 mm blade) get
+a puck under them in Prepare, let into the underside at the deepest point
+of the model's outline (the guard) and sized to the magnet point (its
+height leaves a floor under the pocket, which starts a sink above the
+base); it is on when the model has no room for the pocket, and can be
+forced on or off.
 
 Accessories are downloaded models, never built from primitives; see
 [accessories/README.md](accessories/README.md) for the library layout.
@@ -88,11 +122,11 @@ straight from those negative parts: head 10.2 dia x 4.2 disc, wings
 All four are embedded (inserted at print pauses), so accessories align to
 the centre of each void's outer face projected to the surface. The eyes are
 printed separately (`black.stl` in the voids project, loose on the plate)
-and go into a 3.5 mm pin channel through the head: the build finds that
-channel (a round hole open at both ends), fills it, and seats each eye in
-a mouth of it, pin in and dome out, so every boolean sees a closed head
-with the eye domes on it and a hat over the eyes is carved around them
-instead of leaving plugs into the holes. `goose/goose-colors.json`
+and sit flush in a 3.5 mm pin channel through the head: the build finds
+that channel (a round hole open at both ends) and plugs it in the eye
+colour, just past each mouth, so every boolean sees a closed head with two
+black discs flush with its sides and a hat over the eyes is carved to the
+head instead of leaving plugs into the holes. `goose/goose-colors.json`
 carries each triangle's filament (orange beak, feet and nose; white body;
 the base disc; black eyes) from the project file, for the viewer only.
 
@@ -156,7 +190,10 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/load-model.ts`, `src/obj.ts`, `src/zip-read.ts` read STL, OBJ and 3MF (pure, shared with the app); a 3MF's colours become material tags on the solid
 - `src/threemf-parse.ts` 3MF parts, transforms, filament slots and slicer paint codes; `src/threemf-write.ts` painted 3MF, one mesh or one part per colour
 - `src/split-colours.ts` splits a painted solid into one body per colour
-- `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, fill the hollow underside or add a plug
+- `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, fill the hollow underside, add a plug or a puck for the magnet
+- `src/flat.ts` a flat accessory from a traced picture: plate, colour inlays, puck or in-plate mount, flat or standing
+- `src/neck.ts` the press-fit neck band and the fit of an accessory on it
+- `src/vendor/` image tracing (k-means colours, marching squares) and SVG parsing from Print Factory (MIT)
 - `src/clothing.ts` body profile, contour shirt and garment wrap
 - `src/goose-colors.ts` the goose's per-face filament colours
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)

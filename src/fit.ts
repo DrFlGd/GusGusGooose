@@ -178,6 +178,19 @@ export function frameAt(origin: V3, axis: V3, spinDeg = 0): number[] {
   return [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, a[0], a[1], a[2], 0, origin[0], origin[1], origin[2], 1];
 }
 
+/** The spin, degrees, that turns the accessory's local direction `local` (in its base plane) to point along the world direction `world` at a point with this axis. */
+export function spinToward(axis: V3, local: [number, number], world: V3): number {
+  const f = frameAt([0, 0, 0], axis, 0);
+  const u: V3 = [f[0], f[1], f[2]], v: V3 = [f[4], f[5], f[6]];
+  // spinning by t maps local (x, y) to x·R(t)u + y·R(t)v; the angle of `world` in the (u, v) plane less the angle of `local`
+  const want = Math.atan2(dot(world, v), dot(world, u));
+  const have = Math.atan2(local[1], local[0]);
+  let deg = ((want - have) * 180) / Math.PI;
+  while (deg > 180) deg -= 360;
+  while (deg < -180) deg += 360;
+  return deg;
+}
+
 /**
  * Fit `accessory` (local frame: base centred on the origin, +Z up, so -Z is
  * the side that meets the goose) onto the goose at a magnet point.
