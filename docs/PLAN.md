@@ -352,10 +352,12 @@ model in paint mode.
   instead. Refine and Split by colour use the baked faces; the split's base
   colour (and an import's colour for cut faces) is now the one covering the
   most surface, not the most faces.
-- **Unverified.** No real Bambu file with split paint was at hand, so the
-  split geometry follows PrusaSlicer's source. A test cube with discs
-  crossing its triangles' diagonals is in the project files
-  (`goose/paint-test/`), with a picture of how it should look.
+- **Checked in Bambu Studio.** No real Bambu file with split paint was at
+  hand, so the split geometry follows PrusaSlicer's source. A test cube
+  with discs crossing its triangles' diagonals (`scripts/paint-test-cube.ts`,
+  with `scripts/paint-test-view.mjs` drawing how it should look) has 3-way
+  splits and 1-side splits on every special side; Jerred opened it in Bambu
+  Studio and it matched (2026-11-03). 2-side splits were not in it.
 
 ## Still needed from Jerred
 
