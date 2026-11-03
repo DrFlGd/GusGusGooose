@@ -243,10 +243,20 @@
           <button id="undo">Undo</button>
         </div>
         <p id="paint-info" class="small muted"></p>
+        <label class="check"><input type="checkbox" id="paint-focus" /> Hide the goose and frame the part (focus on painting)</label>
         <div class="row">
           <button id="export-3mf" class="primary">Export 3MF</button>
           <button id="export-fitted-2">Export STL</button>
         </div>
+        <details>
+          <summary>Split by colour</summary>
+          <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one with the most faces).</p>
+          <label>Skin depth <input type="number" id="split-depth" step="0.2" min="0.4" value="1.2" /> mm</label>
+          <div class="row">
+            <button id="export-split">Export 3MF with one part per colour</button>
+          </div>
+          <p id="split-info" class="small muted"></p>
+        </details>
       </section>
 
       <section class="points">

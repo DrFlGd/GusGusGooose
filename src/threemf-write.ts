@@ -35,7 +35,48 @@ export function write3mf(mesh: IndexedMesh, materials: Material[], faceMaterial:
       : `     <triangle v1="${T[i]}" v2="${T[i + 1]}" v3="${T[i + 2]}" pid="1" p1="${m}" />\n`);
   }
   parts.push('    </triangles>\n   </mesh>\n  </object>\n </resources>\n <build>\n  <item objectid="2" />\n </build>\n</model>\n');
-  const model = new TextEncoder().encode(parts.join(''));
+  return packageOf(new TextEncoder().encode(parts.join('')));
+}
+
+export interface MeshPart {
+  name: string;
+  mesh: IndexedMesh;
+  /** index into `materials`: the whole part is this one colour */
+  material: number;
+}
+
+/**
+ * A 3MF of one object made of several parts, each a mesh of one material
+ * (what `splitByMaterial` makes). Slicers that read components as parts of an
+ * object (Bambu Studio, PrusaSlicer, OrcaSlicer) load it as one object with a
+ * part per colour, already aligned.
+ */
+export function write3mfParts(parts: MeshPart[], materials: Material[], name = 'accessory'): Uint8Array {
+  const out: string[] = [];
+  out.push('<?xml version="1.0" encoding="UTF-8"?>\n');
+  out.push('<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n');
+  out.push(` <metadata name="Title">${escapeXml(name)}</metadata>\n`);
+  out.push(' <metadata name="Application">Gus Gus Goose fitter</metadata>\n');
+  out.push(' <resources>\n  <basematerials id="1">\n');
+  for (const m of materials) out.push(`   <base name="${escapeXml(m.name)}" displaycolor="${m.color.toUpperCase()}FF" />\n`);
+  out.push('  </basematerials>\n');
+  parts.forEach((part, i) => {
+    const P = part.mesh.positions, T = part.mesh.triangles;
+    out.push(`  <object id="${i + 2}" name="${escapeXml(part.name)}" type="model" pid="1" pindex="${part.material}">\n   <mesh>\n    <vertices>\n`);
+    for (let k = 0; k < P.length; k += 3) out.push(`     <vertex x="${f(P[k])}" y="${f(P[k + 1])}" z="${f(P[k + 2])}" />\n`);
+    out.push('    </vertices>\n    <triangles>\n');
+    for (let k = 0; k < T.length; k += 3) out.push(`     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" />\n`);
+    out.push('    </triangles>\n   </mesh>\n  </object>\n');
+  });
+  const whole = parts.length + 2;
+  out.push(`  <object id="${whole}" name="${escapeXml(name)}" type="model">\n   <components>\n`);
+  parts.forEach((_, i) => out.push(`    <component objectid="${i + 2}" />\n`));
+  out.push(`   </components>\n  </object>\n </resources>\n <build>\n  <item objectid="${whole}" />\n </build>\n</model>\n`);
+  return packageOf(new TextEncoder().encode(out.join('')));
+}
+
+/** The 3MF package (zip) around one model file. */
+function packageOf(model: Uint8Array): Uint8Array {
   const contentTypes = new TextEncoder().encode('<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />\n <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />\n</Types>\n');
   const rels = new TextEncoder().encode('<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />\n</Relationships>\n');
   return zipStore([

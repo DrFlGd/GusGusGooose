@@ -30,7 +30,16 @@ pause height reported, and exports the holed goose. The Paint tab (after
 a fit or a garment) brushes faces with a palette of your filament colours,
 with Refine to split the mesh for finer edges, Fill all and Undo, and
 exports a 3MF whose colour regions the slicer maps to filaments (STL stays
-for single-colour parts). Everything runs in the page; nothing is uploaded.
+for single-colour parts). A 3MF that comes in with colours keeps them: each
+part's filament slot, paint applied in Bambu Studio or PrusaSlicer (a
+triangle painted in more than one colour takes the colour covering most of
+it), and standard 3MF material groups, including the app's own exports.
+They become the palette, ride through fit and wrap as material tags on the
+solid, and come out on the export. A tick box hides the goose and frames
+the part so you can paint all round it, and Split by colour exports one
+body per colour in a single 3MF (each colour a skin of the chosen depth
+under its faces, the rest with the base colour) for slicers that want
+parts rather than paint. Everything runs in the page; nothing is uploaded.
 Models that are not valid solids (edges shared by three faces, overlapping
 shells, holes) are rebuilt on a voxel grid on import, at a pitch chosen
 from their size or one you set (down to 0.3 mm for more detail, at the
@@ -120,7 +129,9 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
 - `src/hole.ts` magnet-hole tool: snap to surface, cut open or embedded pocket
-- `src/load-model.ts`, `src/obj.ts`, `src/zip-read.ts` read STL, OBJ and 3MF (pure, shared with the app)
+- `src/load-model.ts`, `src/obj.ts`, `src/zip-read.ts` read STL, OBJ and 3MF (pure, shared with the app); a 3MF's colours become material tags on the solid
+- `src/threemf-parse.ts` 3MF parts, transforms, filament slots and slicer paint codes; `src/threemf-write.ts` painted 3MF, one mesh or one part per colour
+- `src/split-colours.ts` splits a painted solid into one body per colour
 - `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, plug
 - `src/clothing.ts` body profile, contour shirt and garment wrap
 - `src/goose-colors.ts` the goose's per-face filament colours

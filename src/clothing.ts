@@ -15,7 +15,7 @@
 
 import type { CrossSection as CrossSectionT, Manifold as ManifoldT } from 'manifold-3d';
 import type { IndexedMesh } from './stl.ts';
-import { fromManifold, manifold, toManifold } from './fit.ts';
+import { fromManifold, fromManifoldTagged, manifold, toManifold, toManifoldTagged } from './fit.ts';
 
 export interface BodyProfile {
   /** axis position */
@@ -728,6 +728,8 @@ export interface WrapOptions extends GarmentOptions {
   liner?: number;
   /** passes of mesh smoothing on the model before it is stretched (0 = none): takes out fine surface texture, which a tall model squashed onto the body would otherwise show as crumple */
   smoothModel?: number;
+  /** the model's material runs (from loadModel), carried through the wrap into result.faceMaterial; faces the wrap makes take `fallback` */
+  tags?: { firstID: number; count: number; fallback?: number };
 }
 
 /**
@@ -894,7 +896,8 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   const maxEdge = Math.min(3, Math.max(1, (bb.max[2] - bb.min[2]) / 50));
   let refined = garment.refineToLength(maxEdge);
   if (refined.numTri() > 3_000_000) refined = garment.refineToLength(maxEdge * 3);
-  const g = smoothMesh(fromManifold(refined), o.smoothModel ?? 0);
+  const tagged = o.tags ? fromManifoldTagged(refined, o.tags.firstID, o.tags.count, o.tags.fallback ?? 0) : null;
+  const g = smoothMesh(tagged ? tagged.mesh : fromManifold(refined), o.smoothModel ?? 0);
   const gz0 = bb.min[2], gh = bb.max[2] - bb.min[2];
   const N = inner.nTheta, bands = Math.max(8, Math.round(gh / 2));
   // per (angle, height band): the garment's nearest and farthest surface from its axis, measured on a section through
@@ -992,7 +995,7 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   }
   let solid: ManifoldT;
   try {
-    solid = await toManifold({ positions, triangles: g.triangles });
+    solid = tagged ? await toManifoldTagged({ positions, triangles: g.triangles }, tagged.faceMaterial, o.tags!.firstID) : await toManifold({ positions, triangles: g.triangles });
   } catch (e) {
     throw new Error(`the stretched garment is not a valid solid (${(e as Error).message}); try a simpler model or a smoother fit`);
   }
@@ -1014,5 +1017,6 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   let parts: ManifoldT[] | undefined;
   if (o.formFit && (o.split ?? 'none') === 'none') warnings.push('a form-fitting garment cannot slide on; split it to wear it');
   if (o.split && o.split !== 'none') ({ solid: result, parts } = await splitGarment(result, cav, o, warnings));
-  return { mesh: fromManifold(result), solid: result, centre: [inner.cx, inner.cy], inner, parts, warnings, mode };
+  const out = o.tags ? fromManifoldTagged(result, o.tags.firstID, o.tags.count, o.tags.fallback ?? 0) : { mesh: fromManifold(result), faceMaterial: undefined };
+  return { mesh: out.mesh, faceMaterial: out.faceMaterial, solid: result, centre: [inner.cx, inner.cy], inner, parts, warnings, mode };
 }

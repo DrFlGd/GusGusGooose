@@ -22,6 +22,21 @@ export interface Part {
   extruder?: number;
   /** filament colour for that slot (#rrggbb), when the project file has it */
   color?: string;
+  /**
+   * Per-triangle filament slot painted on in Bambu Studio / PrusaSlicer
+   * (`paint_color`), 1-based; 0 = not painted, so the part's own slot. Only
+   * present when some triangle is painted. A triangle painted in several
+   * colours (split in the slicer) takes the colour covering most of it.
+   */
+  faceExtruder?: Uint8Array;
+}
+
+export interface Project {
+  parts: Part[];
+  /** the project's filament colours by slot (#rrggbb), when the file has them (Bambu/Orca settings, else the model's own material groups) */
+  colours: string[];
+  /** material names by slot, when the model's material groups name them */
+  names: string[];
 }
 
 /** 3MF transform: 12 numbers, row-vector convention (p' = p·M + t). */
@@ -32,6 +47,10 @@ interface RawObject {
   id: string;
   type: string;
   mesh?: IndexedMesh;
+  paint?: Uint8Array;
+  /** the object's material group and index into it (standard 3MF basematerials or colour groups) */
+  pid?: string;
+  pindex?: number;
   components: { objectId: string; path?: string; transform: Xf }[];
 }
 
@@ -41,12 +60,19 @@ interface RawObject {
  * `model_settings.config` are read.
  */
 export function partsFromFiles(files: Map<string, string>): Part[] {
+  return projectFromFiles(files).parts;
+}
+
+/** As `partsFromFiles`, with the project's filament colours. */
+export function projectFromFiles(files: Map<string, string>): Project {
   const objects = new Map<string, RawObject>(); // key: `${file}#${id}`
   const buildItems: { objectId: string; path: string; transform: Xf }[] = [];
+  const groups = new Map<string, MaterialGroup>(); // key: `${file}#${id}`
   let rootModel = '';
   for (const [rel, xml] of files) {
     if (!rel.endsWith('.model')) continue;
-    for (const o of parseObjects(xml)) objects.set(`${rel}#${o.id}`, o);
+    for (const [id, g] of materialGroups(xml)) groups.set(`${rel}#${id}`, g);
+    for (const o of parseObjects(xml, groups, rel)) objects.set(`${rel}#${o.id}`, o);
     const build = xml.match(/<build[^>]*>([\s\S]*?)<\/build>/);
     if (build && build[1].includes('<item')) {
       rootModel = rel;
@@ -59,7 +85,12 @@ export function partsFromFiles(files: Map<string, string>): Part[] {
   // part names and subtypes from the Bambu/Prusa model settings, when present
   const settings = [...files].find(([k]) => k.endsWith('model_settings.config'))?.[1];
   const names = partNames(settings);
-  const colours = filamentColours([...files].find(([k]) => k.endsWith('project_settings.config'))?.[1]);
+  const objectExtruders = objectExtruderSlots(settings);
+  // slot colours: the slicer project's filaments, else the model's own material group (the first one with colours)
+  const own = [...groups.values()].find((g) => g.colours.length);
+  const projectColours = filamentColours([...files].find(([k]) => k.endsWith('project_settings.config'))?.[1]);
+  const colours = projectColours.length ? projectColours : own?.colours ?? [];
+  const slotNames = projectColours.length ? [] : own?.names ?? [];
 
   const parts: Part[] = [];
   let group = '';
@@ -71,40 +102,101 @@ export function partsFromFiles(files: Map<string, string>): Part[] {
       const kind: Part['kind'] = meta?.subtype === 'negative_part' ? 'negative'
         : meta?.subtype === 'modifier_part' ? 'modifier'
         : o.type === 'other' ? 'negative' : 'normal';
-      const extruder = meta?.extruder;
-      parts.push({ name: meta?.name ?? `object ${objectId}`, kind, mesh: transformMesh(o.mesh, xf), local: o.mesh, transform: xf, group, extruder, color: extruder ? colours[extruder - 1] : undefined });
+      // a part without its own slot prints in its object's slot; painted parts default to slot 1 like the slicer does
+      const extruder = meta?.extruder ?? objectExtruders.get(group) ?? (o.pindex !== undefined ? o.pindex + 1 : o.paint ? 1 : undefined);
+      parts.push({ name: meta?.name ?? `object ${objectId}`, kind, mesh: transformMesh(o.mesh, xf), local: o.mesh, transform: xf, group, extruder, color: extruder ? colours[extruder - 1] : undefined, faceExtruder: o.paint });
     }
     for (const c of o.components) visit(c.objectId, c.path ?? path, compose(c.transform, xf));
   };
   for (const item of buildItems) { group = item.objectId; visit(item.objectId, item.path, item.transform); }
   if (!parts.length) throw new Error(`no printable parts found in the 3MF (root model ${rootModel || 'not found'})`);
-  return parts;
+  return { parts, colours, names: slotNames };
 }
 
 /** Reads a 3MF from its bytes (browser or Node), unzipping with DecompressionStream. */
 export async function parse3mf(data: ArrayBuffer | Uint8Array): Promise<Part[]> {
+  return (await parse3mfProject(data)).parts;
+}
+
+/** As `parse3mf`, with the project's filament colours. */
+export async function parse3mfProject(data: ArrayBuffer | Uint8Array): Promise<Project> {
   const entries = await unzip(data);
   const files = new Map<string, string>();
   const dec = new TextDecoder();
   for (const [name, bytes] of entries) {
     if (name.endsWith('.model') || name.endsWith('_settings.config')) files.set('/' + name.replace(/^\/+/, ''), dec.decode(bytes));
   }
-  return partsFromFiles(files);
+  return projectFromFiles(files);
 }
 
-function parseObjects(xml: string): RawObject[] {
+/**
+ * The filament slot a Bambu Studio / PrusaSlicer `paint_color` code paints a
+ * triangle with (1-based; 0 = unpainted), from the slicer's TriangleSelector
+ * encoding: the hex digits are stored last-nibble-first, each nibble holds
+ * four bits least-significant first, and the bit stream is, per triangle,
+ * 2 bits "sides split" then either (unsplit) a 2-bit state with 4 more bits
+ * when that state is 3, or (split) a 2-bit special side followed by the
+ * children, each encoded the same way. A split triangle takes the slot that
+ * covers most of its area (children of one split counted equal).
+ */
+export function paintExtruder(code: string): number {
+  if (!code) return 0;
+  const bits: number[] = [];
+  for (let i = code.length - 1; i >= 0; i--) {
+    const d = parseInt(code[i], 16);
+    if (Number.isNaN(d)) return 0;
+    bits.push(d & 1, (d >> 1) & 1, (d >> 2) & 1, (d >> 3) & 1);
+  }
+  let pos = 0;
+  const read = (n: number) => { let v = 0; for (let i = 0; i < n; i++) v |= (bits[pos++] ?? 0) << i; return v; };
+  const area = new Map<number, number>();
+  const walk = (weight: number): void => {
+    if (pos >= bits.length) return;
+    const split = read(2);
+    if (split === 0) {
+      let state = read(2);
+      if (state === 3) state = 3 + read(4);
+      area.set(state, (area.get(state) ?? 0) + weight);
+    } else {
+      read(2); // which side is special; irrelevant for the colour
+      for (let c = 0; c <= split; c++) walk(weight / (split + 1));
+    }
+  };
+  walk(1);
+  let best = 0, bestArea = 0;
+  for (const [state, a] of area) if (a > bestArea) { best = state; bestArea = a; }
+  return best;
+}
+
+function parseObjects(xml: string, groups: Map<string, MaterialGroup>, file: string): RawObject[] {
   const out: RawObject[] = [];
   for (const m of xml.matchAll(/<object\s+([^>]*)>([\s\S]*?)<\/object>/g)) {
     const a = attrs(m[1]);
     const body = m[2];
     const o: RawObject = { id: a.id, type: a.type ?? 'model', components: [] };
+    // an object coloured from a material group: its own index, and per-triangle indices as paint
+    const group = a.pid !== undefined && groups.has(`${file}#${a.pid}`) ? a.pid : undefined;
+    if (group !== undefined) { o.pid = group; o.pindex = a.pindex !== undefined ? Number(a.pindex) : 0; }
     const meshXml = body.match(/<mesh>([\s\S]*?)<\/mesh>/);
     if (meshXml) {
       const verts: number[] = [];
       for (const v of meshXml[1].matchAll(/<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"/g)) verts.push(+v[1], +v[2], +v[3]);
-      const tris: number[] = [];
-      for (const t of meshXml[1].matchAll(/<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"/g)) tris.push(+t[1], +t[2], +t[3]);
+      const tris: number[] = [], paint: number[] = [];
+      let painted = false;
+      for (const t of meshXml[1].matchAll(/<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"([^>]*)>/g)) {
+        tris.push(+t[1], +t[2], +t[3]);
+        const code = t[4] && t[4].includes('paint_color') ? t[4].match(/paint_color="([0-9A-Fa-f]*)"/)?.[1] : undefined;
+        let slot = code ? paintExtruder(code) : 0;
+        if (!slot && t[4] && t[4].includes('p1=')) {
+          const ta = attrs(t[4]);
+          const pid = ta.pid ?? group;
+          if (pid !== undefined && groups.has(`${file}#${pid}`) && ta.p1 !== undefined) slot = Number(ta.p1) + 1;
+        }
+        if (slot) painted = true;
+        paint.push(slot);
+      }
       o.mesh = { positions: Float32Array.from(verts), triangles: Uint32Array.from(tris) };
+      if (painted) o.paint = Uint8Array.from(paint);
     }
     for (const c of body.matchAll(/<component\s+([^>]*)\/?>/g)) {
       const ca = attrs(c[1]);
@@ -122,6 +214,48 @@ function partNames(xml?: string): Map<string, { name: string; subtype?: string; 
     const name = p[3].match(/<metadata key="name" value="([^"]*)"/)?.[1] ?? `part ${p[1]}`;
     const ex = p[3].match(/<metadata key="extruder" value="(\d+)"/)?.[1];
     map.set(p[1], { name, subtype: p[2], extruder: ex ? Number(ex) : undefined });
+  }
+  return map;
+}
+
+interface MaterialGroup { colours: string[]; names: string[] }
+
+/**
+ * The model's material groups by id: standard `<basematerials>` (name and
+ * displaycolor per base) and the materials extension's `<m:colorgroup>`
+ * (colour per entry). Only the colour and name are kept.
+ */
+function materialGroups(xml: string): Map<string, MaterialGroup> {
+  const map = new Map<string, MaterialGroup>();
+  for (const g of xml.matchAll(/<basematerials\s+([^>]*)>([\s\S]*?)<\/basematerials>/g)) {
+    const id = attrs(g[1]).id;
+    const colours: string[] = [], names: string[] = [];
+    for (const b of g[2].matchAll(/<base\s+([^>]*)\/?>/g)) {
+      const a = attrs(b[1]);
+      colours.push(rgb(a.displaycolor));
+      names.push(a.name ?? '');
+    }
+    if (id) map.set(id, { colours, names });
+  }
+  for (const g of xml.matchAll(/<m:colorgroup\s+([^>]*)>([\s\S]*?)<\/m:colorgroup>/g)) {
+    const id = attrs(g[1]).id;
+    const colours = [...g[2].matchAll(/<m:color\s+([^>]*)\/?>/g)].map((c) => rgb(attrs(c[1]).color));
+    if (id) map.set(id, { colours, names: [] });
+  }
+  return map;
+}
+
+/** #rrggbb from a 3MF sRGB colour (#rrggbb or #rrggbbaa), white when missing. */
+const rgb = (s?: string) => (s && /^#[0-9a-fA-F]{6}/.test(s) ? s.slice(0, 7).toLowerCase() : '#ffffff');
+
+/** Each object's own filament slot from the model settings (`<object id><metadata key="extruder">`), which its parts inherit. */
+function objectExtruderSlots(xml?: string): Map<string, number> {
+  const map = new Map<string, number>();
+  if (!xml) return map;
+  for (const o of xml.matchAll(/<object\s+id="(\d+)"[^>]*>([\s\S]*?)<\/object>/g)) {
+    const head = o[2].split('<part')[0];
+    const ex = head.match(/<metadata key="extruder" value="(\d+)"/)?.[1];
+    if (ex) map.set(o[1], Number(ex));
   }
   return map;
 }

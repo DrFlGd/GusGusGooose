@@ -12,7 +12,8 @@ import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, typ
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
-import { write3mf, type Material } from '../threemf-write.ts';
+import { write3mf, write3mfParts, type Material } from '../threemf-write.ts';
+import { splitByMaterial } from '../split-colours.ts';
 import { PaintState } from './paint.ts';
 
 type V3 = [number, number, number];
@@ -63,6 +64,7 @@ function toGeometry(mesh: IndexedMesh): THREE.BufferGeometry {
 const gooseMaterial = new THREE.MeshStandardMaterial({ color: 0xe9dcc3, roughness: 0.85, flatShading: false });
 const accessoryMaterial = new THREE.MeshStandardMaterial({ color: 0x6fb1ff, roughness: 0.6, transparent: true, opacity: 0.75 });
 const fittedMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
+const accessoryColouredMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, transparent: true, opacity: 0.85 });
 
 // ---------- state ----------
 let gooseMesh: IndexedMesh;
@@ -83,6 +85,8 @@ let gooseFallback = 0;
 // the loaded model before preparation, and how it is prepared
 let rawModel: ManifoldT | null = null;
 let rawName = '';
+// the loaded model's own colours (a 3MF's filament slots and paint), tracked through booleans as Manifold runs
+let modelTags: { firstID: number; count: number; fallback: number } | null = null;
 const prep: PrepareOptions = { ...DEFAULT_PREPARE };
 const markers = new THREE.Group();
 scene.add(markers);
@@ -220,10 +224,20 @@ async function loadFile(file: File, stay = false) {
     loaded = await loadModel(file.name, await file.arrayBuffer(), { repair: $<HTMLInputElement>('repair-import').checked, voxel: voxel === '' ? undefined : Number(voxel) });
     rawModel = loaded.solid;
     rawName = file.name;
+    // a 3MF's colours become the palette, so they come through to the paint tab and the export
+    if (loaded.materials && loaded.firstID !== undefined) {
+      modelTags = { firstID: loaded.firstID, count: loaded.materials.length, fallback: loaded.fallback ?? 0 };
+      // the model's colours first (the tagged ones), then the usual extras so there is something to paint with
+      setPalette([...loaded.materials, ...DEFAULT_PALETTE.slice(1).filter((d) => !loaded.materials!.some((m) => m.color === d.color))]);
+    } else if (modelTags) {
+      modelTags = null;
+      setPalette(DEFAULT_PALETTE);
+    }
     const bb = rawModel.boundingBox();
     const size = bb.max.map((v, i) => (v - bb.min[i]).toFixed(1)).join(' × ');
     const repaired = loaded.repaired ? ` ${loaded.repaired.parts} part(s) were not valid solids and were rebuilt on a ${loaded.repaired.voxel.toFixed(2)} mm voxel grid.` : '';
-    $('model-info').textContent = `${file.name}: ${loaded.triangles.toLocaleString()} triangles${loaded.parts > 1 ? `, ${loaded.parts} parts joined` : ''}, ${size} mm as downloaded.${repaired}`;
+    const colours = loaded.materials ? ` ${loaded.materials.length} colour${loaded.materials.length > 1 ? 's' : ''} kept for the Paint tab.` : '';
+    $('model-info').textContent = `${file.name}: ${loaded.triangles.toLocaleString()} triangles${loaded.parts > 1 ? `, ${loaded.parts} parts joined` : ''}, ${size} mm as downloaded.${repaired}${colours}`;
   } catch (err) {
     status(`${file.name}: ${(err as Error).message}`);
     return;
@@ -248,6 +262,7 @@ function clearModel() {
   clearFitted();
   rawModel = null;
   rawName = '';
+  if (modelTags) { modelTags = null; setPalette(DEFAULT_PALETTE); }
   baseManifold = null;
   accessoryManifold = null;
   accessoryMesh = null;
@@ -305,7 +320,11 @@ function showAccessory() {
   if (!accessoryMesh) return;
   clearFitted();
   if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); }
-  accessoryObject = new THREE.Mesh(toGeometry(accessoryMesh), accessoryMaterial);
+  // a model with its own colours is previewed in them
+  const tagged = modelTags && accessoryManifold ? fromManifoldTagged(accessoryManifold, modelTags.firstID, modelTags.count, modelTags.fallback) : null;
+  accessoryObject = tagged
+    ? new THREE.Mesh(colouredGeometry(tagged.mesh, tagged.faceMaterial, palette), accessoryColouredMaterial)
+    : new THREE.Mesh(toGeometry(accessoryMesh), accessoryMaterial);
   scene.add(accessoryObject);
   $('accessory-controls').classList.remove('hidden');
   updatePreview();
@@ -455,13 +474,17 @@ function clearFitted() {
   $('fit-result').textContent = '';
   if (accessoryObject) accessoryObject.visible = tab !== 'clothing';
   if (ghost) ghost.visible = tab === 'clothing';
+  applyFocus();
 }
 
-/** Shows `mesh` as the fitted part, with per-face paint colours. */
-function showFitted(mesh: IndexedMesh) {
+/** Shows `mesh` as the fitted part, with per-face paint colours: `faceMaterial` when known, else carried over from the part shown before. */
+function showFitted(mesh: IndexedMesh, faceMaterial?: Uint8Array) {
   const previous = paint;
   paint = new PaintState(mesh, palette);
-  if (previous) {
+  if (faceMaterial) {
+    paint.faceMaterial.set(faceMaterial);
+    paint.recolor();
+  } else if (previous) {
     // carry the paint over by nearest old face centroid
     const oc = previous.centroids, nc = paint.centroids;
     for (let i = 0; i < paint.faceMaterial.length; i++) {
@@ -483,6 +506,7 @@ function showFitted(mesh: IndexedMesh) {
   $<HTMLButtonElement>('paint-tab-button').disabled = false;
   $('paint-info').textContent = `${(mesh.triangles.length / 3).toLocaleString()} faces.`;
   updateClearButtons();
+  if (focusOn()) frameFitted();
 }
 
 $('fit').onclick = async () => {
@@ -495,7 +519,8 @@ $('fit').onclick = async () => {
     profile.clearance = Number($<HTMLInputElement>('clearance').value);
     const t0 = performance.now();
     fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, placement());
-    showFitted(fitted.mesh);
+    const tagged = modelTags ? fromManifoldTagged(fitted.solid, modelTags.firstID, modelTags.count, modelTags.fallback) : null;
+    showFitted(fitted.mesh, tagged?.faceMaterial);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('fit-result').textContent = `Fitted in ${secs} s: ${fitted.volumeBefore.toFixed(0)} → ${fitted.volumeAfter.toFixed(0)} mm³, ${fitted.bodies} body.` + (fitted.warnings.length ? ` Warnings: ${fitted.warnings.join('; ')}` : '');
     $<HTMLButtonElement>('export-fitted').disabled = false;
@@ -513,13 +538,21 @@ $('export-fitted-2').onclick = exportStl;
 
 // ---------- paint ----------
 let paint: PaintState | null = null;
-const palette: Material[] = [
+const DEFAULT_PALETTE: Material[] = [
   { name: 'Base', color: '#e9dcc3' },
   { name: 'Black', color: '#222222' },
   { name: 'Orange', color: '#f28c28' },
   { name: 'Red', color: '#d03b2f' },
 ];
+const palette: Material[] = DEFAULT_PALETTE.map((m) => ({ ...m }));
 let activeMaterial = 1;
+/** Replaces the palette (the paint state shares the array, so it recolours too). */
+function setPalette(materials: Material[]) {
+  palette.splice(0, palette.length, ...materials.map((m) => ({ ...m })));
+  activeMaterial = Math.min(1, palette.length - 1);
+  renderPalette();
+  paint?.recolor();
+}
 
 function renderPalette() {
   const el = $('palette');
@@ -548,10 +581,13 @@ $('refine').onclick = async () => {
   status('Refining…');
   await new Promise((r) => setTimeout(r, 20));
   try {
-    const m = await toManifold(paint.mesh);
-    const refined = fromManifold(m.refineToLength(len));
-    showFitted(refined);
-    status(`Refined to ${(refined.triangles.length / 3).toLocaleString()} faces.`);
+    // the paint rides along as material runs, so every new face keeps its parent's colour
+    const { Manifold } = await manifold();
+    const firstID = Manifold.reserveIDs(palette.length);
+    const m = await toManifoldTagged(paint.mesh, paint.faceMaterial, firstID);
+    const refined = fromManifoldTagged(m.refineToLength(len), firstID, palette.length);
+    showFitted(refined.mesh, refined.faceMaterial);
+    status(`Refined to ${(refined.mesh.triangles.length / 3).toLocaleString()} faces.`);
   } catch (err) {
     status(`Refine failed: ${(err as Error).message}`);
   }
@@ -560,10 +596,64 @@ $('export-3mf').onclick = () => {
   if (!paint) return;
   const used = new Set(paint.faceMaterial);
   const names = palette.filter((_, i) => used.has(i)).map((m) => m.name).join(', ');
-  download(`accessory.${activePoint}.fitted.3mf`, write3mf(paint.mesh, palette, paint.faceMaterial, `goose ${activePoint} accessory`));
+  download(`${exportName()}.3mf`, write3mf(paint.mesh, palette, paint.faceMaterial, `goose ${activePoint} accessory`));
   status(`3MF exported with colours: ${names}. Map them to filaments in your slicer.`);
 };
+/** The fitted part's file name: the garment's when one was made, else the accessory's point. */
+const exportName = () => (garmentName && !fitted ? garmentName : `accessory.${activePoint}.fitted`);
+$('export-split').onclick = async () => {
+  if (!paint) return;
+  const depth = Number($<HTMLInputElement>('split-depth').value) || 1.2;
+  status('Splitting by colour…');
+  $<HTMLButtonElement>('export-split').disabled = true;
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    const t0 = performance.now();
+    const r = await splitByMaterial(paint.mesh, paint.faceMaterial, palette.length, { depth });
+    const parts = r.parts.map((p) => ({ name: palette[p.material].name, mesh: p.mesh, material: p.material }));
+    download(`${exportName()}.parts.3mf`, write3mfParts(parts, palette, `goose ${activePoint} accessory`));
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    $('split-info').textContent = `${parts.length} parts in ${secs} s: ${r.parts.map((p) => `${palette[p.material].name} ${p.volume.toFixed(0)} mm³`).join(', ')}.` + (r.warnings.length ? ` ${r.warnings.join('; ')}.` : '');
+    status(`Exported one part per colour (${parts.length}); the slicer loads them as one object.`);
+  } catch (err) {
+    status(`Split failed: ${(err as Error).message}`);
+  } finally {
+    $<HTMLButtonElement>('export-split').disabled = false;
+  }
+};
 renderPalette();
+
+// ---------- focus view: the goose and its markers out of the way, the camera on the painted part ----------
+const focusOn = () => tab === 'paint' && $<HTMLInputElement>('paint-focus').checked;
+let savedView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
+/** Hides or shows everything that is not the fitted part. */
+function applyFocus() {
+  const on = focusOn() && !!fittedObject;
+  if (gooseObject) gooseObject.visible = !on;
+  markers.visible = !on;
+  if (pickMarker) pickMarker.visible = !on;
+  grid.visible = !on;
+  if (on) {
+    if (!savedView) savedView = { position: camera.position.clone(), target: controls.target.clone() };
+    frameFitted();
+  } else if (savedView) {
+    camera.position.copy(savedView.position);
+    controls.target.copy(savedView.target);
+    savedView = null;
+  }
+}
+/** Moves the camera, keeping its direction, so the fitted part fills the view. */
+function frameFitted() {
+  if (!fittedObject) return;
+  const box = new THREE.Box3().setFromObject(fittedObject);
+  const centre = box.getCenter(new THREE.Vector3());
+  const radius = box.getSize(new THREE.Vector3()).length() / 2;
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  const dist = (radius / Math.sin((camera.fov / 2) * (Math.PI / 180))) * 1.15;
+  controls.target.copy(centre);
+  camera.position.copy(centre).addScaledVector(dir, Math.max(dist, 20));
+}
+$<HTMLInputElement>('paint-focus').onchange = applyFocus;
 
 let painting = false;
 function paintAt(e: PointerEvent) {
@@ -587,6 +677,7 @@ function setTab(name: string) {
   for (const t of ['accessory', 'clothing', 'hole', 'paint']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
   guides.visible = name === 'clothing';
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
+  applyFocus();
   // in paint mode the left button paints and the right button orbits
   controls.mouseButtons = name === 'paint'
     ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
@@ -631,6 +722,7 @@ function garmentOptions(): Partial<WrapOptions> {
     keepTop: num('cloth-keep-top'), liner: num('cloth-liner'), smoothModel: num('cloth-smooth-model'), garmentTurn: num('wrap-turn'), garmentShift: [num('wrap-dx'), num('wrap-dy')],
     garmentBand: [num('wrap-band-lo'), $<HTMLInputElement>('wrap-band-hi').value === '' ? Infinity : num('wrap-band-hi')],
     garmentCrop: [num('wrap-crop-l'), num('wrap-crop-r'), num('wrap-crop-f'), num('wrap-crop-b')],
+    tags: modelTags ?? undefined,
   };
 }
 $<HTMLInputElement>('cloth-lean').oninput = () => { $('cloth-lean-out').textContent = $<HTMLInputElement>('cloth-lean').value; };
@@ -696,8 +788,7 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
     const t0 = performance.now();
     const g = kind === 'shirt' ? await contourGarment(gooseManifold, o) : await wrapGarment(accessoryManifold!, gooseManifold, o);
     clearFitted();
-    showFitted(g.mesh);
-    if (g.faceMaterial && paint) { paint.faceMaterial.set(g.faceMaterial); paint.recolor(); }
+    showFitted(g.mesh, g.faceMaterial);
     garmentParts = g.parts && g.parts.length > 1 ? g.parts.map((p) => fromManifold(p)) : null;
     garmentName = kind === 'shirt' ? `shirt.${o.hem}-${o.neck}` : `${rawName.replace(/\.[^.]+$/, '')}.wrapped`;
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
@@ -794,6 +885,7 @@ function download(name: string, bytes: Uint8Array) {
 // small hook for the headless smoke test: where a world point lands on screen
 (window as unknown as { __goose: unknown }).__goose = {
   get profile() { return profile; },
+  get gooseVisible() { return gooseObject.visible; },
   toScreen(p: V3) {
     const v = new THREE.Vector3(...p).project(camera);
     const rect = renderer.domElement.getBoundingClientRect();

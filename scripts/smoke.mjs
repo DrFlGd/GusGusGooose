@@ -80,6 +80,19 @@ const threemf = join(out, 'accessory.3mf');
 await download.saveAs(threemf);
 console.log('3e.', await status(), '→', threemf);
 await page.screenshot({ path: join(out, '3c-painted.png') });
+// focus view: the goose goes, the camera frames the part; off again and the goose is back
+await page.check('#paint-focus');
+const hidden = await page.evaluate(() => window.__goose.gooseVisible);
+await page.screenshot({ path: join(out, '3f-focus.png') });
+await page.uncheck('#paint-focus');
+const shown = await page.evaluate(() => window.__goose.gooseVisible);
+console.log('3f. focus hides the goose:', !hidden, '| back after:', shown);
+if (hidden || !shown) throw new Error('focus view did not toggle the goose');
+// one part per colour
+await page.click('#tab-paint details summary');
+const [splitDl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('#export-split')]);
+await page.waitForFunction(() => document.getElementById('split-info').textContent.includes('parts'), null, { timeout: 60000 });
+console.log('3g.', await page.locator('#split-info').textContent(), '→', splitDl.suggestedFilename());
 await page.click('.tabs button[data-tab="accessory"]');
 
 // a downloaded model: a 3MF with two parts, dropped in, flipped, scaled to 20 mm wide, with a plug

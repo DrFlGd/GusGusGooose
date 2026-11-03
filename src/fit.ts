@@ -56,6 +56,8 @@ export interface PocketSpec {
 
 export interface FitResult {
   mesh: IndexedMesh;
+  /** the same result as a Manifold, with the accessory's material runs intact (see fromManifoldTagged) */
+  solid: ManifoldT;
   volumeBefore: number;
   volumeAfter: number;
   bodies: number;
@@ -216,7 +218,7 @@ export async function fitAccessory(
   const floor = fitted.intersect(probe).volume();
   if (!spec.none && floor < probe.volume() * 0.9) warnings.push('pocket floor thinner than 0.8 mm; sink less or thicken the base');
 
-  return { mesh: fromManifold(fitted), volumeBefore, volumeAfter, bodies, warnings };
+  return { mesh: fromManifold(fitted), solid: fitted, volumeBefore, volumeAfter, bodies, warnings };
 }
 
 /**
