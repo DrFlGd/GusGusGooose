@@ -359,6 +359,39 @@ model in paint mode.
   splits and 1-side splits on every special side; Jerred opened it in Bambu
   Studio and it matched (2026-11-03). 2-side splits were not in it.
 
+## Paint after a move, and leaning with the head (Jerred, 2026-11-03, late)
+
+Jerred found the Paint tab closed once he moved a painted accessory (it
+came back only with Fit, and the paint was gone then), and asked for an
+option to stand the hat on the head's own tilt: "Sometimes I would like the
+hat to fit straight up but sometimes following the head tilt is ideal."
+
+- **Paint stays open.** The Paint tab is open whenever an accessory is
+  loaded. Opening it with nothing fitted fits the accessory where it is.
+  Moving an accessory keeps the last fit's paint and where the accessory's
+  own frame sat (`placementMatrix`, the same placement the fit makes); the
+  next fit of the same accessory maps each face back into that frame and
+  takes the colour of the old surface under it, split where the colour
+  changes (`PaintModel.transferFrom`). Manifold triangulates the part
+  afresh on every fit (only 5 to 25 % of faces come back the same), so the
+  paint is resampled: a piece is split only while a colour edge of the old
+  paint (a side between two colours, `ColourEdges`) comes within 0.01 mm
+  of it, down to 0.06 mm, and takes the colour of the old triangle under
+  its middle; only old faces facing the same way count, so a thin wall's
+  far side does not bleed through. On a puck with 84,000 baked paint
+  triangles that takes 2 to 3 s (a first version that tested every old
+  triangle took 20 to 30 s), and each colour's area on the unchanged top
+  stays the same to 0.1 mm². A changed accessory (a new puck, a rebuilt
+  picture) starts its paint afresh, and the status line says so.
+- **Stands.** "Straight up from the magnet" is the old behaviour.
+  "Leaning with the surface round it" fits a plane through 48 rays on two
+  rings just outside the magnet's mouth (`surfaceUp`; rings further out
+  than about 8 mm from the head's centre land on its sides) and turns the
+  frame by the smallest rotation onto its normal, so the spin keeps facing
+  the same way. Measured on the goose: head 15.9°, left wing 6.5°, right
+  wing 8.2°, beak 3.3°. The magnet pocket stays square to the magnet. The
+  neck band has no such choice.
+
 ## Still needed from Jerred
 
 - [ ] The goose base STL with the magnet voids in it, the exact file sliced from. It gets bundled into the app at `goose/goose.stl`.

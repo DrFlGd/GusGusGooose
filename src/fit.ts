@@ -39,6 +39,13 @@ export interface Placement {
   tilt?: [number, number];
   /** slide of the accessory base in its own XY, mm */
   offset: [number, number];
+  /**
+   * stand the accessory along this direction instead of the magnet axis (the
+   * tilt of the surface around the magnet, from `surfaceUp`): the magnet frame
+   * turned by the smallest rotation onto it, so the spin still faces the same
+   * way; the pocket stays square to the magnet
+   */
+  up?: V3;
   /** per-accessory pocket overrides; anything unset mirrors the goose void and the profile */
   pocket?: PocketSpec;
 }
@@ -178,6 +185,119 @@ export function frameAt(origin: V3, axis: V3, spinDeg = 0): number[] {
   return [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, a[0], a[1], a[2], 0, origin[0], origin[1], origin[2], 1];
 }
 
+/**
+ * The frame an accessory stands in at a magnet point (column-major 4x4): its
+ * base on the void mouth, sunk `sink` mm along the way it stands, spun about
+ * the magnet axis; with `up`, turned by the smallest rotation that stands it
+ * along `up` instead. The tilt and slide come on top (see placementMatrix).
+ */
+export function standFrame(pt: { center: V3; axis: V3 }, sink: number, spin: number, up?: V3): number[] {
+  const along = up ? normalize(up) : normalize(pt.axis);
+  const f = frameAt(add(pt.center, scale(along, -sink)), pt.axis, spin);
+  if (!up) return f;
+  const a = normalize(pt.axis);
+  const k = cross(a, along), s = Math.hypot(k[0], k[1], k[2]), c = dot(a, along);
+  if (s < 1e-9) return f;
+  const n = scale(k, 1 / s);
+  // Rodrigues: v cos θ + (n × v) sin θ + n (n · v)(1 − cos θ)
+  const turn = (v: V3): V3 => { const nv = cross(n, v), d = dot(n, v) * (1 - c); return [v[0] * c + nv[0] * s + n[0] * d, v[1] * c + nv[1] * s + n[1] * d, v[2] * c + nv[2] * s + n[2] * d]; };
+  const u = turn([f[0], f[1], f[2]]), v = turn([f[4], f[5], f[6]]), w = turn([f[8], f[9], f[10]]);
+  return [u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, w[0], w[1], w[2], 0, f[12], f[13], f[14], 1];
+}
+
+/** The whole placement as one column-major 4x4, accessory's own frame → world: standFrame · tilt (x, then y) · slide. */
+export function placementMatrix(pt: { center: V3; axis: V3 }, pl: Omit<Placement, 'point'>): number[] {
+  const m = standFrame(pt, pl.sink, pl.spin, pl.up);
+  const [tx, ty] = (pl.tilt ?? [0, 0]).map((d) => (d * Math.PI) / 180);
+  const rx = [1, 0, 0, 0, 0, Math.cos(tx), Math.sin(tx), 0, 0, -Math.sin(tx), Math.cos(tx), 0, 0, 0, 0, 1];
+  const ry = [Math.cos(ty), 0, -Math.sin(ty), 0, 0, 1, 0, 0, Math.sin(ty), 0, Math.cos(ty), 0, 0, 0, 0, 1];
+  const slide = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, pl.offset[0], pl.offset[1], 0, 1];
+  return mul4(mul4(mul4(m, ry), rx), slide);
+}
+
+function mul4(a: number[], b: number[]): number[] {
+  const out = new Array<number>(16).fill(0);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) out[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k];
+  return out;
+}
+
+/**
+ * Which way the surface around a magnet point faces: rays come in along the
+ * magnet axis on two rings just outside the void's mouth (`ring` and twice
+ * `ring` mm past its rim), a plane is fitted through where they land, and
+ * its normal is returned, on the axis's side. Null when too few rays land.
+ * The rings stay close so they read the local tilt, not the curve of the
+ * head round them (on the goose's head, rings past about 8 mm from the
+ * centre start to land on its sides and swing the answer). For standing an
+ * accessory along the head's own tilt rather than straight along the magnet.
+ */
+export function surfaceUp(mesh: IndexedMesh, pt: { center: V3; axis: V3; diameter: number }, ring = 1.2): { up: V3; tiltDeg: number } | null {
+  const a = normalize(pt.axis);
+  const helper: V3 = Math.abs(a[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const u = normalize(cross(helper, a)), v = cross(a, u);
+  const P = mesh.positions, T = mesh.triangles;
+  const rings = [pt.diameter / 2 + ring, pt.diameter / 2 + 2 * ring];
+  const height = 40;
+  // only triangles whose box, in the magnet's frame, reaches the rays
+  const reach = rings[1] + 0.5;
+  const near: number[] = [];
+  for (let t = 0; t < T.length / 3; t++) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let k = 0; k < 3; k++) {
+      const i = T[t * 3 + k] * 3;
+      const d: V3 = [P[i] - pt.center[0], P[i + 1] - pt.center[1], P[i + 2] - pt.center[2]];
+      const q = [dot(d, u), dot(d, v), dot(d, a)];
+      for (let j = 0; j < 3; j++) { lo[j] = Math.min(lo[j], q[j]); hi[j] = Math.max(hi[j], q[j]); }
+    }
+    if (lo[0] < reach && hi[0] > -reach && lo[1] < reach && hi[1] > -reach && lo[2] < height && hi[2] > -height) near.push(t);
+  }
+  const hits: [number, number, number][] = []; // (x, y, height) in the magnet's own frame
+  for (const r of rings) for (let i = 0; i < 24; i++) {
+    const ang = (i / 24) * Math.PI * 2;
+    const x = Math.cos(ang) * r, y = Math.sin(ang) * r;
+    const o: V3 = [pt.center[0] + u[0] * x + v[0] * y + a[0] * height, pt.center[1] + u[1] * x + v[1] * y + a[1] * height, pt.center[2] + u[2] * x + v[2] * y + a[2] * height];
+    let best = Infinity;
+    for (const t of near) {
+      const hit = rayTriangle(o, scale(a, -1), P, T[t * 3], T[t * 3 + 1], T[t * 3 + 2]);
+      if (hit !== null && hit < best) best = hit;
+    }
+    if (best < Infinity) hits.push([x, y, height - best]);
+  }
+  if (hits.length < 12) return null;
+  // least squares h = p x + q y + c
+  let sxx = 0, sxy = 0, syy = 0, sx = 0, sy = 0, sh = 0, sxh = 0, syh = 0;
+  for (const [x, y, h] of hits) { sxx += x * x; sxy += x * y; syy += y * y; sx += x; sy += y; sh += h; sxh += x * h; syh += y * h; }
+  const n = hits.length;
+  // solve [[sxx sxy sx][sxy syy sy][sx sy n]] [p q c] = [sxh syh sh]
+  const M = [[sxx, sxy, sx, sxh], [sxy, syy, sy, syh], [sx, sy, n, sh]];
+  for (let i = 0; i < 3; i++) {
+    let piv = i;
+    for (let r = i + 1; r < 3; r++) if (Math.abs(M[r][i]) > Math.abs(M[piv][i])) piv = r;
+    [M[i], M[piv]] = [M[piv], M[i]];
+    if (Math.abs(M[i][i]) < 1e-12) return null;
+    for (let r = 0; r < 3; r++) if (r !== i) { const f = M[r][i] / M[i][i]; for (let c = i; c < 4; c++) M[r][c] -= f * M[i][c]; }
+  }
+  const p = M[0][3] / M[0][0], q = M[1][3] / M[1][1];
+  const up = normalize([a[0] - p * u[0] - q * v[0], a[1] - p * u[1] - q * v[1], a[2] - p * u[2] - q * v[2]]);
+  return { up, tiltDeg: (Math.acos(Math.min(1, dot(up, a))) * 180) / Math.PI };
+}
+
+/** Distance along a ray (unit `dir`) to a triangle, or null (Möller–Trumbore, both sides). */
+function rayTriangle(o: V3, dir: V3, P: Float32Array, i0: number, i1: number, i2: number): number | null {
+  const ax = P[i0 * 3], ay = P[i0 * 3 + 1], az = P[i0 * 3 + 2];
+  const e1: V3 = [P[i1 * 3] - ax, P[i1 * 3 + 1] - ay, P[i1 * 3 + 2] - az], e2: V3 = [P[i2 * 3] - ax, P[i2 * 3 + 1] - ay, P[i2 * 3 + 2] - az];
+  const pv = cross(dir, e2), det = dot(e1, pv);
+  if (Math.abs(det) < 1e-12) return null;
+  const inv = 1 / det;
+  const tv: V3 = [o[0] - ax, o[1] - ay, o[2] - az];
+  const bu = dot(tv, pv) * inv;
+  if (bu < 0 || bu > 1) return null;
+  const qv = cross(tv, e1), bv = dot(dir, qv) * inv;
+  if (bv < 0 || bu + bv > 1) return null;
+  const t = dot(e2, qv) * inv;
+  return t > 0 ? t : null;
+}
+
 /** The spin, degrees, that turns the accessory's local direction `local` (in its base plane) to point along the world direction `world` at a point with this axis. */
 export function spinToward(axis: V3, local: [number, number], world: V3): number {
   const f = frameAt([0, 0, 0], axis, 0);
@@ -207,11 +327,10 @@ export async function fitAccessory(
   const warnings: string[] = [];
 
   // 1. place the accessory: base at the void mouth, sunk into the goose
-  const origin = add(pt.center, scale(pt.axis, -placement.sink));
   const [tx, ty] = placement.tilt ?? [0, 0];
   let placed = accessory.translate(placement.offset[0], placement.offset[1], 0);
   if (tx || ty) placed = placed.rotate([tx, ty, 0]);
-  placed = placed.transform(frameAt(origin, pt.axis, placement.spin) as any);
+  placed = placed.transform(standFrame(pt, placement.sink, placement.spin, placement.up) as any);
   const volumeBefore = placed.volume();
 
   // 2. crop the goose to the accessory's neighbourhood, then grow it by the clearance

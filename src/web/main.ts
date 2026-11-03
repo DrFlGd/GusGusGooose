@@ -6,7 +6,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
-import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, spinToward, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
+import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, placementMatrix, spinToward, standFrame, surfaceUp, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
 import { loadModel } from '../load-model.ts';
 import { DEFAULT_PREPARE, holdsMagnet, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
 import { buildFlat, cssColor, DEFAULT_FLAT, svgDesign, type FlatDesign, type FlatOptions } from '../flat.ts';
@@ -406,6 +406,7 @@ $<HTMLInputElement>('cloth-file').onchange = (e) => {
 /** Forgets the loaded model and any fitted part or garment, back to the bare goose, so another model can be started from scratch. */
 function clearModel() {
   clearFitted();
+  carry = null;
   rawModel = null;
   rawName = '';
   preparedKey = '';
@@ -415,6 +416,7 @@ function clearModel() {
   if (modelTags) { modelTags = null; setPalette(DEFAULT_PALETTE); }
   baseManifold = null;
   accessoryManifold = null;
+  updatePaintButton();
   accessoryMesh = null;
   garmentParts = null;
   loadSerial++;
@@ -698,13 +700,13 @@ for (const id of ['flat-orientation', 'flat-attach']) {
 // ---------- the magnet mount and the placement, per position ----------
 // each position keeps its own placement and mount, so a picture standing on the head and one lying on a wing do not
 // share a spin or a puck; a new model starts every position afresh from its defaults
-const POSITION_FIELDS = ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'flat-mount', 'flat-orientation', 'flat-attach', 'flat-puck-d', 'flat-puck-h', 'prep-puck', 'prep-puck-attach', 'prep-puck-d', 'prep-puck-h'];
+const POSITION_FIELDS = ['stand', 'sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'flat-mount', 'flat-orientation', 'flat-attach', 'flat-puck-d', 'flat-puck-h', 'prep-puck', 'prep-puck-attach', 'prep-puck-d', 'prep-puck-h'];
 interface PositionState { values: Record<string, string>; flatMountAt?: [number, number]; puckAt?: [number, number] }
 const positions = new Map<string, PositionState>();
 /** A position's starting settings: pictures stand up on the head (puck behind, resting on it) and lie flat elsewhere; the neck band needs no magnet. */
 function positionDefaults(name: string): Record<string, string> {
   return {
-    sink: name === 'neck' ? '0' : '2', spin: '0', 'tilt-x': '0', 'tilt-y': '0', dx: '0', dy: '0',
+    stand: 'magnet', sink: name === 'neck' ? '0' : '2', spin: '0', 'tilt-x': '0', 'tilt-y': '0', dx: '0', dy: '0',
     'flat-mount': name === 'neck' ? 'none' : 'puck', 'flat-orientation': name === 'head' ? 'standing' : 'flat', 'flat-attach': 'back', 'flat-puck-d': '', 'flat-puck-h': '',
     'prep-puck': name === 'neck' ? 'never' : 'auto', 'prep-puck-attach': 'under', 'prep-puck-d': '', 'prep-puck-h': '',
   };
@@ -747,6 +749,7 @@ function choosePoint(name: string) {
 function updateMountControls() {
   const neck = activePoint === 'neck';
   $('mount-details').classList.toggle('hidden', neck);
+  $('stand-row').classList.toggle('hidden', neck);
   $('flat-mount-controls').classList.toggle('hidden', !flatDesign);
   $('puck-controls').classList.toggle('hidden', !rawModel);
   const kind = $<HTMLSelectElement>('flat-mount').value;
@@ -850,6 +853,28 @@ $<HTMLInputElement>('decoration-file').onchange = async (e) => {
   }
 };
 
+// ---------- standing square to the magnet, or with the surface's tilt ----------
+// the goose's head leans about 15° from its magnet; a hat can stand straight up (square to the magnet) or lean with it
+let tiltCache: { mesh: IndexedMesh; at: WeakMap<object, { up: V3; tiltDeg: number } | null> } | null = null;
+/** How the surface round the current magnet leans (not for the neck band); read once per point and goose. */
+function surfaceTilt(): { up: V3; tiltDeg: number } | null {
+  const pt = activePoint === 'neck' ? undefined : currentPoint();
+  if (!pt || !gooseMesh) return null;
+  if (tiltCache?.mesh !== gooseMesh) tiltCache = { mesh: gooseMesh, at: new WeakMap() };
+  let r = tiltCache.at.get(pt);
+  if (r === undefined) { r = surfaceUp(gooseMesh, pt); tiltCache.at.set(pt, r); }
+  return r;
+}
+function updateStandInfo() {
+  const info = $('stand-info');
+  if (activePoint === 'neck') { info.textContent = ''; return; }
+  const s = surfaceTilt();
+  const where = activePoint.replace('_', ' ');
+  info.textContent = !s ? 'The surface round this magnet could not be read, so it stands square to the magnet.'
+    : $<HTMLSelectElement>('stand').value === 'surface' ? `The ${where} leans ${s.tiltDeg.toFixed(1)}° from its magnet, and the accessory leans with it. The magnet pocket stays square to the magnet.`
+    : `Straight up from the magnet. The ${where} itself leans ${s.tiltDeg.toFixed(1)}° from it.`;
+}
+
 function placement(): Placement {
   const num = (id: string) => { const v = $<HTMLInputElement>(id).value; return v === '' ? undefined : Number(v); };
   return {
@@ -858,6 +883,7 @@ function placement(): Placement {
     spin: Number($<HTMLInputElement>('spin').value),
     tilt: [Number($<HTMLInputElement>('tilt-x').value), Number($<HTMLInputElement>('tilt-y').value)],
     offset: [Number($<HTMLInputElement>('dx').value), Number($<HTMLInputElement>('dy').value)],
+    up: $<HTMLSelectElement>('stand').value === 'surface' ? surfaceTilt()?.up : undefined,
     pocket: {
       diameter: num('pocket-dia'),
       thickness: num('pocket-thick'),
@@ -923,9 +949,9 @@ function updatePreview() {
   const pt = currentPoint();
   if (!pt) return;
   const pl = placement();
-  const origin: V3 = [pt.center[0] - pt.axis[0] * pl.sink, pt.center[1] - pt.axis[1] * pl.sink, pt.center[2] - pt.axis[2] * pl.sink];
-  // pivot = frame (with the spin) · tilt about y · tilt about x, as fitAccessory applies them; the mesh carries the slide
-  const frame = new THREE.Matrix4().fromArray(frameAt(origin, pt.axis, pl.spin));
+  updateStandInfo();
+  // pivot = stand frame (with the spin) · tilt about y · tilt about x, as fitAccessory applies them; the mesh carries the slide
+  const frame = new THREE.Matrix4().fromArray(standFrame(pt, pl.sink, pl.spin, pl.up));
   const tilt = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pl.tilt![0]), THREE.MathUtils.degToRad(pl.tilt![1]), 0, 'ZYX'));
   frame.multiply(tilt).decompose(accessoryPivot.position, accessoryPivot.quaternion, accessoryPivot.scale);
   accessoryObject.position.set(pl.offset[0], pl.offset[1], 0);
@@ -936,6 +962,7 @@ function updatePreview() {
 for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'clearance']) {
   $<HTMLInputElement>(id).oninput = () => { clearFitted(); updatePreview(); };
 }
+$<HTMLSelectElement>('stand').onchange = () => { clearFitted(); updatePreview(); };
 
 // ---------- rotation rings on the accessory ----------
 // a click on the accessory shows three rings (red and green tilt it, blue spins it about the magnet axis); dragging a ring
@@ -950,9 +977,8 @@ gizmo.addEventListener('objectChange', () => {
   const pt = currentPoint();
   if (!pt) return;
   const pl = placement();
-  const origin: V3 = [pt.center[0] - pt.axis[0] * pl.sink, pt.center[1] - pt.axis[1] * pl.sink, pt.center[2] - pt.axis[2] * pl.sink];
   // what is left once the bare frame is taken off the pivot: Rz(spin) · Ry(tilt y) · Rx(tilt x)
-  const bare = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().fromArray(frameAt(origin, pt.axis, 0)));
+  const bare = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().fromArray(standFrame(pt, pl.sink, 0, pl.up)));
   const local = bare.invert().multiply(accessoryPivot.quaternion);
   const e = new THREE.Euler().setFromQuaternion(local, 'ZYX');
   const set = (id: string, deg: number, step: number, limit: number) => { $<HTMLInputElement>(id).value = String(Math.max(-limit, Math.min(limit, Math.round(deg / step) * step))); };
@@ -978,19 +1004,36 @@ function pointHint() {
   input.title = w ? `Empty keeps the model's size; about ${w} mm suits the ${activePoint.replace('_', ' ')}` : 'Empty keeps the model\'s size';
 }
 
+/**
+ * The paint of the last fit, kept when the accessory is moved, so the next
+ * fit of the same accessory takes it over where the accessory now sits.
+ */
+let carry: { paint: PaintState; frame: number[]; on: ManifoldT } | null = null;
+/** the accessory that was fitted, and where its own frame sits in the world (placementMatrix of the fit) */
+let fittedFrame: { frame: number[]; on: ManifoldT } | null = null;
+
 function clearFitted() {
+  if (paint && fitted && fittedFrame && paint.painted) carry = { paint, ...fittedFrame };
+  fittedFrame = null;
   if (fittedObject) { scene.remove(fittedObject); fittedObject.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); fittedObject = null; }
   fitted = null;
   // the band goes back to the one the options make, with its tabs at full length
   if (fittedBand && neckBand) showBand(neckBand.band);
   fittedBand = null;
   paint = null;
-  $<HTMLButtonElement>('paint-tab-button').disabled = true;
+  updatePaintButton();
   $('fit-result').textContent = '';
   if (accessoryObject) accessoryObject.visible = tab !== 'clothing';
   if (ghost) ghost.visible = tab === 'clothing';
   updateExports();
   applyFocus();
+}
+
+/** Paint is open once there is something to paint: a fitted part or a garment, or an accessory, which entering Paint fits where it is. */
+function updatePaintButton() {
+  const b = $<HTMLButtonElement>('paint-tab-button');
+  b.disabled = !paint && !accessoryManifold;
+  b.title = paint ? '' : accessoryManifold ? 'Fits the accessory where it is now, then paints it' : 'Load an accessory or make a garment first';
 }
 
 /** The export buttons are live when there is a fitted part or a garment, and the panel says what they give. */
@@ -1021,46 +1064,77 @@ function showFitted(mesh: IndexedMesh, faceMaterial?: Uint8Array) {
   idMap = null;
   if (accessoryObject) accessoryObject.visible = false;
   hideGhost();
-  $<HTMLButtonElement>('paint-tab-button').disabled = false;
+  updatePaintButton();
   $('paint-info').textContent = `${(mesh.triangles.length / 3).toLocaleString()} faces.`;
   updateClearButtons();
   updateExports();
   if (focusOn()) frameFitted();
 }
 
-$('fit').onclick = async () => {
-  if (!accessoryManifold) return;
+let fitting = false;
+/** Fits the accessory where it is placed; true when it worked. The paint of the last fit comes along when only the placement changed. */
+async function runFit(): Promise<boolean> {
+  if (!accessoryManifold || fitting) return false;
+  fitting = true;
   clearFitted();
   status('Fitting…');
+  if (tab === 'paint') $('paint-info').textContent = 'Fitting the accessory where it is now…';
   $<HTMLButtonElement>('fit').disabled = true;
   await new Promise((r) => setTimeout(r, 20)); // let the status paint
   try {
     profile.clearance = Number($<HTMLInputElement>('clearance').value);
     const t0 = performance.now();
+    let frame: number[];
     if (activePoint === 'neck') {
       const band = await ensureBand();
       if (!band) throw new Error('the neck band could not be made');
-      const { point: _p, pocket: _k, ...rest } = placement();
+      const { point: _p, pocket: _k, up: _u, ...rest } = placement();
       const r = await fitOnNeck(gooseManifold, accessoryManifold, profile, band, rest, neckOptions());
       fitted = r;
       fittedBand = r.band;
+      frame = placementMatrix(band.point, rest);
       showBand(r.band); // with its tabs as long as the accessory has room for, or none
       $('neck-info').textContent = band.tabs.length ? (r.tabLength ? `Fitted with ${r.tabLength.toFixed(1)} mm tabs; the slots stop ${SLOT_SKIN} mm short of the accessory's front.` : 'Fitted without tabs: the accessory is too thin for slots, so glue it to the band.') : 'Fitted for gluing to the band.';
     } else {
-      fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, placement());
+      const pl = placement();
+      fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, pl);
+      frame = placementMatrix(profile.points[pl.point], pl);
     }
     const tagged = modelTags ? fromManifoldTagged(fitted.solid, modelTags.firstID, modelTags.count, modelTags.fallback) : null;
     showFitted(fitted.mesh, tagged?.faceMaterial);
+    let carried = '';
+    if (carry && paint) {
+      if (carry.on === accessoryManifold) {
+        status('Moving the paint with it…');
+        await new Promise((r) => setTimeout(r, 20));
+        // a point of the new fit → the accessory's own frame → where that was on the old fit
+        const m = new THREE.Matrix4().fromArray(carry.frame).multiply(new THREE.Matrix4().fromArray(frame).invert()).elements;
+        paint.transferFrom(carry.paint, (p) => [
+          m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+          m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+          m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14],
+        ]);
+        updatePaintInfo();
+        carried = ' The paint moved with it.';
+      } else carried = ' The accessory itself changed since it was painted, so paint added to it was not carried over.';
+    }
+    carry = null;
+    fittedFrame = { frame, on: accessoryManifold };
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('fit-result').textContent = `Fitted in ${secs} s: ${fitted.volumeBefore.toFixed(0)} → ${fitted.volumeAfter.toFixed(0)} mm³, ${fitted.bodies} body.` + (fittedBand ? ' The band is a separate part: Export gives both.' : '') + (fitted.warnings.length ? ` Warnings: ${fitted.warnings.join('; ')}` : '');
     updateExports();
-    status('Fit done. Export on the right, or adjust and fit again.');
+    status(`Fit done.${carried} Export on the right, or adjust and fit again.`);
+    return true;
   } catch (err) {
     status(`Fit failed: ${(err as Error).message}`);
+    if (tab === 'paint') $('paint-info').textContent = 'The fit failed: see the status line, then adjust on the Accessory tab.';
+    return false;
   } finally {
+    fitting = false;
     $<HTMLButtonElement>('fit').disabled = false;
   }
-};
+}
+$('fit').onclick = () => { void runFit(); };
 
 /** STL: the fitted part (plus the neck band as a second file), or a garment, one file per half when it is split. */
 $('export-fitted').onclick = () => {
@@ -1600,7 +1674,12 @@ function setTab(name: string) {
     ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
     : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 }
-for (const b of document.querySelectorAll<HTMLButtonElement>('.tabs button')) b.onclick = () => setTab(b.dataset.tab!);
+for (const b of document.querySelectorAll<HTMLButtonElement>('.tabs button')) b.onclick = () => {
+  const name = b.dataset.tab!;
+  setTab(name);
+  // Paint with nothing fitted fits the accessory where it is placed (and brings its paint along after a move)
+  if (name === 'paint' && !paint && accessoryManifold && !fitting) void runFit().then((ok) => { if (!ok && tab === 'paint' && !paint) setTab('accessory'); });
+};
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (tab !== 'paint' || e.button !== 0 || !paint || paintTool !== 'brush') return;
@@ -1897,6 +1976,18 @@ function download(name: string, bytes: Uint8Array) {
   get ringsShown() { return !!gizmo.object; },
   get band() { return neckBand ? { width: neckBand.neckWidth, opening: neckBand.openingWidth, tabs: neckBand.tabs.length, volume: neckBand.band.volume(), shown: !!bandObject && bandObject.visible } : null; },
   get mount() { return flatResult ? flatResult.mountAt : preparedPuckAt; },
+  /** the paint's area per palette colour, mm², from its baked faces (for checking paint survives a refit) */
+  get paintAreas() {
+    if (!paint) return null;
+    const b = paint.baked(), P = b.mesh.positions, T = b.mesh.triangles, out: Record<number, number> = {};
+    for (let i = 0; i < T.length / 3; i++) {
+      const p = [0, 1, 2].map((k) => T[i * 3 + k] * 3);
+      const u = [0, 1, 2].map((d) => P[p[1] + d] - P[p[0] + d]), v = [0, 1, 2].map((d) => P[p[2] + d] - P[p[0] + d]);
+      const a = Math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]) / 2;
+      out[b.faceMaterial[i]] = (out[b.faceMaterial[i]] ?? 0) + a;
+    }
+    return out;
+  },
   /** the model's width along x over a band of heights, in its own frame (for checking which way up a picture is) */
   accessoryWidth(zLo: number, zHi: number) {
     if (!accessoryMesh) return 0;

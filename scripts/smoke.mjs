@@ -210,6 +210,33 @@ await page.click('#refine');
 await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Refined'), null, { timeout: 60000 });
 console.log('3l.', await status());
 await page.click('.tabs button[data-tab="accessory"]');
+// moving the painted accessory keeps Paint open: entering it fits again, and the paint comes along in the accessory's frame
+const areasBefore = await page.evaluate(() => window.__goose.paintAreas);
+await page.fill('#dx', '3');
+await page.dispatchEvent('#dx', 'input');
+const paintOpen = await page.evaluate(() => !document.getElementById('paint-tab-button').disabled);
+const t0Carry = Date.now();
+await page.click('.tabs button[data-tab="paint"]');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Fit done'), null, { timeout: 120000 });
+const areasAfter = await page.evaluate(() => window.__goose.paintAreas);
+const carryText = await status();
+console.log(`3m. Paint open after a move: ${paintOpen} | ${carryText} (${((Date.now() - t0Carry) / 1000).toFixed(1)} s) | areas`, JSON.stringify(areasBefore, (k, v) => typeof v === 'number' ? Math.round(v) : v), '→', JSON.stringify(areasAfter, (k, v) => typeof v === 'number' ? Math.round(v) : v), '|', await page.locator('#paint-info').textContent());
+if (!paintOpen) throw new Error('the Paint tab closed after a move');
+if (!carryText.includes('moved with it')) throw new Error('the paint did not come along with the move');
+for (const m of Object.keys(areasBefore)) if (m !== '0' && Math.abs((areasAfter[m] ?? 0) - areasBefore[m]) > Math.max(2, 0.05 * areasBefore[m])) throw new Error(`colour ${m} changed from ${areasBefore[m]} to ${areasAfter[m]} mm² in the move`);
+await page.screenshot({ path: join(out, '3m-paint-moved.png') });
+// leaning with the head: the hint gives the head's tilt and the fit follows it, the paint again with it
+await page.click('.tabs button[data-tab="accessory"]');
+await page.selectOption('#stand', 'surface');
+const standInfo = await page.locator('#stand-info').textContent();
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('3n.', standInfo, '|', await page.locator('#fit-result').textContent(), '|', await status());
+if (!/leans 1[3-8]\.\d°/.test(standInfo)) throw new Error('the head tilt was not read');
+await page.screenshot({ path: join(out, '3n-leaning.png') });
+await page.selectOption('#stand', 'magnet');
+await page.fill('#dx', '0');
+await page.dispatchEvent('#dx', 'input');
 
 // a downloaded model: a 3MF with two parts, dropped in, flipped, scaled to 20 mm wide, with a plug
 const { write3mf } = await import('../src/threemf-write.ts');

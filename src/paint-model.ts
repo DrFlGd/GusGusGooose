@@ -378,45 +378,224 @@ export class PaintModel {
     return out;
   }
 
-  /** Takes the paint of another part by nearest point (after a refit or a refine of a different mesh). */
-  carryFrom(previous: PaintModel): void {
+  /** Takes the paint of another part where it lies in the same place (a refit without a move, a different mesh). */
+  carryFrom(previous: PaintModel): void { this.transferFrom(previous, (p) => p); }
+
+  /**
+   * Takes another part's paint: `toPrevious` maps a point of this part to
+   * where it was on that one (the same accessory fitted again after a move,
+   * say; it must be a move, so lengths and flat faces stay as they are).
+   * Each face takes the colour of the old surface under it, and is split
+   * where that changes, down to `minEdge` mm, so paint inside faces carries
+   * over as such. Only old faces facing the same way count, so the far side
+   * of a thin wall or the next face round a corner does not bleed in; a face
+   * with nothing under it (where the goose carves the part differently now)
+   * takes the colour nearest to it.
+   */
+  transferFrom(previous: PaintModel, toPrevious: (p: number[]) => number[], minEdge = 0.06): void {
     const b = previous.baked();
-    const P = b.mesh.positions, T = b.mesh.triangles, m = T.length / 3;
-    const pts = new Float32Array(m * 3);
-    for (let i = 0; i < m; i++) for (let d = 0; d < 3; d++) pts[i * 3 + d] = (P[T[i * 3] * 3 + d] + P[T[i * 3 + 1] * 3 + d] + P[T[i * 3 + 2] * 3 + d]) / 3;
-    const nearest = nearestPoints(pts);
+    const grid = new TriangleGrid(b.mesh);
+    const labels = b.faceMaterial;
+    const edges = new ColourEdges(b.mesh, labels);
+    const tol = 0.01; // the old surface lies within this of the new one where they are the same surface
+    const e2 = minEdge * minEdge;
+    // colour edges near the piece, as a stack: a piece's list follows its parent's, its children's lists follow it
+    let buf = new Int32Array(1 << 12);
+    const A = [0, 0, 0], B = [0, 0, 0], C = [0, 0, 0];
+    // this face's corners where they were, and its plane there
+    let fa = A, fb = B, fc = C, nx = 0, ny = 0, nz = 0, flat = false;
+    const facing = (t: number) => grid.facing(t, nx, ny, nz) > 0.3;
+    const at = (w: Bary, out: number[]) => { for (let d = 0; d < 3; d++) out[d] = w[0] * fa[d] + w[1] * fb[d] + w[2] * fc[d]; };
+    const a = [0, 0, 0], bb = [0, 0, 0], c = [0, 0, 0];
+    const recent = [-1, -1, -1, -1];
+    let slot = 0;
+    /**
+     * The colour of the old surface at a place: of the old triangle (facing this face's way) nearest it. Unless `exact`,
+     * any within `tol` will do: for a piece no colour edge comes near, all of those are its colour.
+     */
+    const colourAt = (x: number, y: number, z: number, exact = false): number => {
+      // pieces come in order, so the triangle under the last few is often under this one too
+      if (!exact) for (const t of recent) if (t >= 0 && grid.distance2(t, x, y, z) <= tol * tol && (!flat || facing(t))) return labels[t];
+      const [t, d] = grid.nearest(x, y, z, flat ? facing : undefined, 0.5, exact ? 1e-5 : tol); // a place on a triangle has none nearer
+      if (d <= tol * tol) { recent[slot] = t; slot = (slot + 1) & 3; }
+      return labels[d < Infinity ? t : grid.nearest(x, y, z)[0]];
+    };
+    // a piece of the face, with the colour edges that could cross it (buf[from..to], those near its parent): it is one
+    // colour when none comes within `tol` of it, else split along them
+    const visit = (n: PaintNode, from: number, to: number, depth: number) => {
+      at(n.v[0], a); at(n.v[1], bb); at(n.v[2], c);
+      const mx = (a[0] + bb[0] + c[0]) / 3, my = (a[1] + bb[1] + c[1]) / 3, mz = (a[2] + bb[2] + c[2]) / 3;
+      const reach = Math.sqrt(Math.max((a[0] - mx) ** 2 + (a[1] - my) ** 2 + (a[2] - mz) ** 2, (bb[0] - mx) ** 2 + (bb[1] - my) ** 2 + (bb[2] - mz) ** 2, (c[0] - mx) ** 2 + (c[1] - my) ** 2 + (c[2] - mz) ** 2)) + tol;
+      if (buf.length < to + (to - from)) { const grown = new Int32Array(Math.max(buf.length * 2, to + (to - from))); grown.set(buf.subarray(0, to)); buf = grown; }
+      let top = to;
+      const cen = edges.centre, half = edges.half;
+      for (let i = from; i < to; i++) {
+        const e = buf[i];
+        // loose tests, cheap first, together tight: within reach of the piece's middle, near its plane, and near the piece
+        const qx = cen[e * 3], qy = cen[e * 3 + 1], qz = cen[e * 3 + 2], r = half[e] + tol;
+        const dx = qx - mx, dy = qy - my, dz = qz - mz;
+        if (dx * dx + dy * dy + dz * dz > (reach + half[e]) ** 2) continue;
+        if (flat && Math.abs(nx * dx + ny * dy + nz * dz) > r) continue;
+        if (pointTriangle2(qx, qy, qz, a[0], a[1], a[2], bb[0], bb[1], bb[2], c[0], c[1], c[2]) > r * r) continue;
+        if (half[e] > tol && edges.distance2(e, mx, my, mz) > reach * reach) continue;
+        buf[top++] = e;
+      }
+      if (top === to) { n.material = colourAt(mx, my, mz); return; } // one colour
+      const long: [boolean, boolean, boolean] = [dist2(a, bb) > e2, dist2(bb, c) > e2, dist2(c, a) > e2];
+      if ((long[0] || long[1] || long[2]) && depth < MAX_DEPTH) {
+        splitLong(n, long);
+        for (const ch of n.children!) visit(ch, to, top, depth + 1);
+        return;
+      }
+      n.material = colourAt(mx, my, mz, true); // too small to split further: what is under its middle
+    };
+    const lo = [0, 0, 0], hi = [0, 0, 0];
     this.trees.clear();
-    const c = this.centroids;
-    for (let f = 0; f < this.count; f++) this.faceMaterial[f] = b.faceMaterial[nearest(c[f * 3], c[f * 3 + 1], c[f * 3 + 2])];
+    for (let f = 0; f < this.count; f++) {
+      const t: PaintNode = { v: CORNERS, material: 0 };
+      this.point(f, CORNERS[0], A); this.point(f, CORNERS[1], B); this.point(f, CORNERS[2], C);
+      fa = toPrevious(A); fb = toPrevious(B); fc = toPrevious(C);
+      nx = (fb[1] - fa[1]) * (fc[2] - fa[2]) - (fb[2] - fa[2]) * (fc[1] - fa[1]);
+      ny = (fb[2] - fa[2]) * (fc[0] - fa[0]) - (fb[0] - fa[0]) * (fc[2] - fa[2]);
+      nz = (fb[0] - fa[0]) * (fc[1] - fa[1]) - (fb[1] - fa[1]) * (fc[0] - fa[0]);
+      const len = Math.hypot(nx, ny, nz);
+      flat = len > 1e-12;
+      if (flat) { nx /= len; ny /= len; nz /= len; }
+      // the colour edges near this face between old faces facing its way (a corner between two colours is not an edge here)
+      for (let d = 0; d < 3; d++) { lo[d] = Math.min(fa[d], fb[d], fc[d]) - tol; hi[d] = Math.max(fa[d], fb[d], fc[d]) + tol; }
+      const near = edges.inBox(lo, hi, flat ? (e) => facing(edges.tri[e * 2]) && facing(edges.tri[e * 2 + 1]) : undefined);
+      if (!near.length) { this.faceMaterial[f] = colourAt((fa[0] + fb[0] + fc[0]) / 3, (fa[1] + fb[1] + fc[1]) / 3, (fa[2] + fb[2] + fc[2]) / 3); continue; } // no colour edge on it
+      if (buf.length < near.length * 2) buf = new Int32Array(near.length * 4);
+      buf.set(near);
+      visit(t, 0, near.length, 0);
+      if (collapse(t)) this.faceMaterial[f] = t.material;
+      else { this.trees.set(f, t); this.faceMaterial[f] = majority(t); }
+    }
     this.all = true;
     this.changed();
+  }
+}
+
+/**
+ * The colour edges of a painted mesh: the sides between two triangles of
+ * different colours, each with its two triangles, on a uniform grid.
+ */
+export class ColourEdges {
+  readonly ends: Float32Array;
+  readonly tri: Int32Array;
+  readonly centre: Float32Array;
+  readonly half: Float32Array;
+  readonly count: number;
+  private lo = [0, 0, 0];
+  private size = 1;
+  private dims = [1, 1, 1];
+  private cells = new Map<number, number[]>();
+  private seen: Uint32Array;
+  private tick = 0;
+
+  constructor(mesh: IndexedMesh, labels: ArrayLike<number>) {
+    const P = mesh.positions, T = mesh.triangles, nv = P.length / 3;
+    const open = new Map<number, number>(); // a side seen once: (from, to) → its triangle
+    const found: number[] = [];
+    for (let t = 0; t < T.length / 3; t++) for (let k = 0; k < 3; k++) {
+      const i = T[t * 3 + k], j = T[t * 3 + ((k + 1) % 3)];
+      const back = open.get(j * nv + i);
+      if (back === undefined) { open.set(i * nv + j, t); continue; }
+      open.delete(j * nv + i);
+      if (labels[back] !== labels[t]) found.push(i, j, back, t);
+    }
+    const n = (this.count = found.length / 4);
+    this.ends = new Float32Array(n * 6); this.tri = new Int32Array(n * 2); this.centre = new Float32Array(n * 3); this.half = new Float32Array(n);
+    this.seen = new Uint32Array(n);
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let e = 0; e < n; e++) {
+      const i = found[e * 4], j = found[e * 4 + 1];
+      for (let d = 0; d < 3; d++) {
+        const p = P[i * 3 + d], q = P[j * 3 + d];
+        this.ends[e * 6 + d] = p; this.ends[e * 6 + 3 + d] = q; this.centre[e * 3 + d] = (p + q) / 2;
+        lo[d] = Math.min(lo[d], p, q); hi[d] = Math.max(hi[d], p, q);
+      }
+      this.half[e] = Math.hypot(P[i * 3] - P[j * 3], P[i * 3 + 1] - P[j * 3 + 1], P[i * 3 + 2] - P[j * 3 + 2]) / 2;
+      this.tri[e * 2] = found[e * 4 + 2]; this.tri[e * 2 + 1] = found[e * 4 + 3];
+    }
+    if (!n) return;
+    const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-6);
+    this.lo = lo;
+    this.size = span / Math.max(1, Math.min(128, Math.round(Math.sqrt(n) / 2)));
+    this.dims = [0, 1, 2].map((d) => Math.max(1, Math.ceil((hi[d] - lo[d]) / this.size) + 1));
+    for (let e = 0; e < n; e++) {
+      const r0 = [0, 1, 2].map((d) => this.cell(Math.min(this.ends[e * 6 + d], this.ends[e * 6 + 3 + d]), d));
+      const r1 = [0, 1, 2].map((d) => this.cell(Math.max(this.ends[e * 6 + d], this.ends[e * 6 + 3 + d]), d));
+      for (let i = r0[0]; i <= r1[0]; i++) for (let j = r0[1]; j <= r1[1]; j++) for (let k = r0[2]; k <= r1[2]; k++) {
+        const key = this.key(i, j, k);
+        let list = this.cells.get(key);
+        if (!list) this.cells.set(key, (list = []));
+        list.push(e);
+      }
+    }
+  }
+
+  private cell(v: number, d: number) { return Math.max(0, Math.min(this.dims[d] - 1, Math.floor((v - this.lo[d]) / this.size))); }
+  private key(i: number, j: number, k: number) { return (i * this.dims[1] + j) * this.dims[2] + k; }
+
+  /** The edges (that `accept` takes) listed in the cells a box overlaps. */
+  inBox(lo: number[], hi: number[], accept?: (e: number) => boolean): number[] {
+    const out: number[] = [];
+    if (!this.count) return out;
+    if (++this.tick === 0xffffffff) { this.seen.fill(0); this.tick = 1; }
+    const stamp = this.tick, seen = this.seen;
+    const i0 = this.cell(lo[0], 0), i1 = this.cell(hi[0], 0), j0 = this.cell(lo[1], 1), j1 = this.cell(hi[1], 1), k0 = this.cell(lo[2], 2), k1 = this.cell(hi[2], 2);
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) for (let k = k0; k <= k1; k++) {
+      const list = this.cells.get(this.key(i, j, k));
+      if (!list) continue;
+      for (const e of list) {
+        if (seen[e] === stamp) continue;
+        seen[e] = stamp;
+        if (!accept || accept(e)) out.push(e);
+      }
+    }
+    return out;
+  }
+
+  /** Squared distance from a place to edge `e`. */
+  distance2(e: number, x: number, y: number, z: number): number {
+    const E = this.ends, o = e * 6;
+    const dx = E[o + 3] - E[o], dy = E[o + 4] - E[o + 1], dz = E[o + 5] - E[o + 2];
+    const l2 = dx * dx + dy * dy + dz * dz;
+    let u = l2 > 0 ? ((x - E[o]) * dx + (y - E[o + 1]) * dy + (z - E[o + 2]) * dz) / l2 : 0;
+    u = Math.max(0, Math.min(1, u));
+    return (E[o] + dx * u - x) ** 2 + (E[o + 1] + dy * u - y) ** 2 + (E[o + 2] + dz * u - z) ** 2;
   }
 }
 
 const dist2 = (a: number[], b: number[]) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
 
 /** Squared distance from `p` to the triangle abc (Ericson, Real-Time Collision Detection 5.1.5). */
-export function triangleDistance2(p: { x: number; y: number; z: number }, a: number[], b: number[], c: number[]): number {
-  const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-  const ap = [p.x - a[0], p.y - a[1], p.z - a[2]];
-  const dot = (u: number[], v: number[]) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
-  const at = (s: number, t: number) => { const q = [a[0] + ab[0] * s + ac[0] * t, a[1] + ab[1] * s + ac[1] * t, a[2] + ab[2] * s + ac[2] * t]; return (q[0] - p.x) ** 2 + (q[1] - p.y) ** 2 + (q[2] - p.z) ** 2; };
-  const d1 = dot(ab, ap), d2 = dot(ac, ap);
-  if (d1 <= 0 && d2 <= 0) return at(0, 0);
-  const bp = [p.x - b[0], p.y - b[1], p.z - b[2]];
-  const d3 = dot(ab, bp), d4 = dot(ac, bp);
-  if (d3 >= 0 && d4 <= d3) return at(1, 0);
-  const vc = d1 * d4 - d3 * d2;
-  if (vc <= 0 && d1 >= 0 && d3 <= 0) return at(d1 / (d1 - d3), 0);
-  const cp = [p.x - c[0], p.y - c[1], p.z - c[2]];
-  const d5 = dot(ab, cp), d6 = dot(ac, cp);
-  if (d6 >= 0 && d5 <= d6) return at(0, 1);
-  const vb = d5 * d2 - d1 * d6;
-  if (vb <= 0 && d2 >= 0 && d6 <= 0) return at(0, d2 / (d2 - d6));
-  const va = d3 * d6 - d5 * d4;
-  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); return at(1 - w, w); }
-  const denom = 1 / (va + vb + vc);
-  return at(vb * denom, vc * denom);
+export function triangleDistance2(p: { x: number; y: number; z: number }, a: ArrayLike<number>, b: ArrayLike<number>, c: ArrayLike<number>): number {
+  return pointTriangle2(p.x, p.y, p.z, a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+}
+
+/** triangleDistance2 on plain numbers (no arrays or closures, for the hot loops). */
+function pointTriangle2(px: number, py: number, pz: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number): number {
+  const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az;
+  const apx = px - ax, apy = py - ay, apz = pz - az;
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+  let s = 0, t = 0;
+  if (d1 <= 0 && d2 <= 0) { s = 0; t = 0; } else {
+    const bpx = px - bx, bpy = py - by, bpz = pz - bz;
+    const d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+    const cpx = px - cx, cpy = py - cy, cpz = pz - cz;
+    const d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+    const vc = d1 * d4 - d3 * d2, vb = d5 * d2 - d1 * d6, va = d3 * d6 - d5 * d4;
+    if (d3 >= 0 && d4 <= d3) { s = 1; t = 0; }
+    else if (vc <= 0 && d1 >= 0 && d3 <= 0) { s = d1 / (d1 - d3); t = 0; }
+    else if (d6 >= 0 && d5 <= d6) { s = 0; t = 1; }
+    else if (vb <= 0 && d2 >= 0 && d6 <= 0) { s = 0; t = d2 / (d2 - d6); }
+    else if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); s = 1 - w; t = w; }
+    else { const denom = 1 / (va + vb + vc); s = vb * denom; t = vc * denom; }
+  }
+  const qx = ax + abx * s + acx * t - px, qy = ay + aby * s + acy * t - py, qz = az + abz * s + acz * t - pz;
+  return qx * qx + qy * qy + qz * qz;
 }
 
 /** Nearest-point lookup over packed xyz points, on a uniform grid. */
@@ -457,4 +636,108 @@ export function nearestPoints(pts: Float32Array): (x: number, y: number, z: numb
     }
     return best;
   };
+}
+
+/**
+ * A mesh's triangles on a uniform grid (each listed in every cell its plane
+ * passes through), for the nearest one to a place.
+ */
+export class TriangleGrid {
+  private P: Float32Array;
+  private T: Uint32Array;
+  private normals: Float32Array;
+  private lo = [0, 0, 0];
+  private size = 1;
+  private dims = [1, 1, 1];
+  private cells = new Map<number, number[]>();
+  private seen: Uint32Array;
+  private tick = 0;
+
+  constructor(mesh: IndexedMesh) {
+    const P = (this.P = mesh.positions), T = (this.T = mesh.triangles as Uint32Array), m = T.length / 3;
+    this.normals = faceNormals(mesh);
+    this.seen = new Uint32Array(m);
+    if (!m) return;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < T.length; i++) for (let d = 0; d < 3; d++) { const v = P[T[i] * 3 + d]; if (v < lo[d]) lo[d] = v; if (v > hi[d]) hi[d] = v; }
+    const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-6);
+    // a surface, so about as many cells across as the square root of its triangles: a few triangles per cell where it is dense
+    const cells = Math.max(1, Math.min(160, Math.round(Math.sqrt(m) / 2)));
+    this.lo = lo;
+    this.size = span / cells;
+    const size = this.size, half = size * 0.87; // a cell the plane crosses has its middle this close to it
+    this.dims = [0, 1, 2].map((d) => Math.max(1, Math.ceil((hi[d] - lo[d]) / size) + 1));
+    const n = this.normals;
+    for (let t = 0; t < m; t++) {
+      const i0 = T[t * 3] * 3, i1 = T[t * 3 + 1] * 3, i2 = T[t * 3 + 2] * 3;
+      const r0 = [0, 1, 2].map((d) => this.cell(Math.min(P[i0 + d], P[i1 + d], P[i2 + d]), d));
+      const r1 = [0, 1, 2].map((d) => this.cell(Math.max(P[i0 + d], P[i1 + d], P[i2 + d]), d));
+      const wide = (r1[0] - r0[0] + 1) * (r1[1] - r0[1] + 1) * (r1[2] - r0[2] + 1) > 8;
+      for (let i = r0[0]; i <= r1[0]; i++) for (let j = r0[1]; j <= r1[1]; j++) for (let k = r0[2]; k <= r1[2]; k++) {
+        if (wide) {
+          const cx = lo[0] + (i + 0.5) * size - P[i0], cy = lo[1] + (j + 0.5) * size - P[i0 + 1], cz = lo[2] + (k + 0.5) * size - P[i0 + 2];
+          if (Math.abs(cx * n[t * 3] + cy * n[t * 3 + 1] + cz * n[t * 3 + 2]) > half) continue;
+        }
+        const key = this.key(i, j, k);
+        let list = this.cells.get(key);
+        if (!list) this.cells.set(key, (list = []));
+        list.push(t);
+      }
+    }
+  }
+
+  private cell(v: number, d: number) { return Math.max(0, Math.min(this.dims[d] - 1, Math.floor((v - this.lo[d]) / this.size))); }
+  private key(i: number, j: number, k: number) { return (i * this.dims[1] + j) * this.dims[2] + k; }
+
+  /** How far triangle `t` faces along the unit direction (x, y, z): the cosine between them. */
+  facing(t: number, x: number, y: number, z: number): number {
+    const n = this.normals;
+    return n[t * 3] * x + n[t * 3 + 1] * y + n[t * 3 + 2] * z;
+  }
+
+  /** Squared distance from (x, y, z) to triangle `t`. */
+  distance2(t: number, x: number, y: number, z: number): number {
+    const P = this.P, T = this.T, i = T[t * 3] * 3, j = T[t * 3 + 1] * 3, k = T[t * 3 + 2] * 3;
+    return pointTriangle2(x, y, z, P[i], P[i + 1], P[i + 2], P[j], P[j + 1], P[j + 2], P[k], P[k + 1], P[k + 2]);
+  }
+
+  private next(): number {
+    if (++this.tick === 0xffffffff) { this.seen.fill(0); this.tick = 1; }
+    return this.tick;
+  }
+
+  /**
+   * The nearest triangle (that `accept` takes, within `within` mm) and its
+   * squared distance; [0, Infinity] when there is none. One within `enough`
+   * mm will do, which saves looking further when the place lies on one.
+   */
+  nearest(x: number, y: number, z: number, accept?: (t: number) => boolean, within = Infinity, enough = 0): [number, number] {
+    const dims = this.dims, stamp = this.next(), seen = this.seen;
+    const ci = this.cell(x, 0), cj = this.cell(y, 1), ck = this.cell(z, 2);
+    let best = 0, bestD = Infinity;
+    const most = Math.max(...dims);
+    for (let r = 0; r <= most; r++) {
+      // the shell of this ring only: all of k on its two x and two y faces, the two ends of k inside them
+      for (let i = Math.max(0, ci - r); i <= Math.min(dims[0] - 1, ci + r); i++) for (let j = Math.max(0, cj - r); j <= Math.min(dims[1] - 1, cj + r); j++) {
+        const side = Math.abs(i - ci) === r || Math.abs(j - cj) === r;
+        const step = side || r === 0 ? 1 : 2 * r;
+        for (let k = ck - r; k <= ck + r; k += step) {
+          if (k < 0 || k >= dims[2]) continue;
+          const list = this.cells.get(this.key(i, j, k));
+          if (!list) continue;
+          for (const t of list) {
+            if (seen[t] === stamp) continue;
+            seen[t] = stamp;
+            if (accept && !accept(t)) continue;
+            const d = this.distance2(t, x, y, z);
+            if (d < bestD) { bestD = d; best = t; }
+          }
+        }
+      }
+      // every triangle in a later ring is at least r cells away
+      if (bestD < Infinity && (Math.sqrt(bestD) <= r * this.size || bestD <= enough * enough)) break;
+      if (r * this.size > within) break;
+    }
+    return bestD <= within * within ? [best, bestD] : [0, Infinity];
+  }
 }

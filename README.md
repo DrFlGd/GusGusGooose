@@ -31,7 +31,9 @@ two halves with small disc-magnet pockets along the seams, and a form-fit
 option lets the halves hug the chest and the tail. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
 pause height reported, and exports the holed goose. The Paint tab (after
-a fit or a garment) paints with a palette of your filament colours:
+a fit or a garment; with an accessory loaded but not fitted, opening it
+fits the accessory where it is, and after a move the paint comes along to
+where the accessory now sits) paints with a palette of your filament colours:
 a brush, a bucket that fills a region until it meets another colour or a
 crease (the angle is yours to set), a corners tool that fills whatever you
 can see inside the corners you click, a text stamp and an image stamp
@@ -130,6 +132,10 @@ Each position keeps its own placement and mount (sink, spin, tilts,
 slides, the puck's layout and size, a moved magnet), so moving to another
 position starts it from that position's defaults and coming back restores
 what was set there; loading a new model starts every position afresh.
+Stands chooses how the model stands on its magnet: straight up from the
+magnet, or leaning with the surface round it (the head leans about 16°
+from its magnet, the wings 6 to 8°, the beak 3°; the magnet pocket stays
+square to the magnet either way).
 Hide goose frames the model, fitted or not, to look it over, and "Move the
 magnet" puts the magnet where you click: a puck moves under the spot, a
 picture's mount moves to it, and a plain model slides so the spot sits over

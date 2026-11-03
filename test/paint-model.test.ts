@@ -159,3 +159,40 @@ test('paint inside triangles survives a 3MF export and import', async () => {
   for (const m of [1, 2]) assert.ok(Math.abs((a.get(m) ?? 0) - (want.get(m) ?? 0)) < 0.01, `colour ${m}: ${a.get(m)} vs ${want.get(m)}`);
   assert.ok(Math.abs(loaded.solid.volume() - 8000) < 0.01);
 });
+
+test('paint moves with the part: a transfer after a move keeps each colour and the paint inside faces', async () => {
+  const { Manifold } = await manifold();
+  const mesh = fromManifold(Manifold.cube([20, 20, 20], true));
+  const model = new PaintModel(mesh);
+  model.brush({ x: 2, y: -3, z: 10 }, 5, 1); // a disc on the top, across the diagonal
+  model.brush({ x: 10, y: 0, z: 2 }, 3, 2); // and a smaller one on a side
+  // the same part fitted again turned 30° about z and moved: the paint should follow it there
+  const c = Math.cos(Math.PI / 6), s = Math.sin(Math.PI / 6), shift = [7, -4, 3];
+  const there = (p: number[]) => [c * p[0] - s * p[1] + shift[0], s * p[0] + c * p[1] + shift[1], p[2] + shift[2]];
+  const back = (p: number[]) => { const x = p[0] - shift[0], y = p[1] - shift[1]; return [c * x + s * y, -s * x + c * y, p[2] - shift[2]]; };
+  const moved: IndexedMesh = { positions: new Float32Array(mesh.positions.length), triangles: mesh.triangles };
+  for (let i = 0; i < mesh.positions.length; i += 3) moved.positions.set(there([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]), i);
+  const after = new PaintModel(moved);
+  after.transferFrom(model, back);
+  assert.ok(after.trees.size >= 3, `the discs are still inside faces (${after.trees.size} split faces)`);
+  const a = areas(after), want = areas(model);
+  for (const m of [1, 2]) {
+    const w = want.get(m) ?? 0;
+    assert.ok(Math.abs((a.get(m) ?? 0) - w) / w < 0.02, `colour ${m}: ${a.get(m)} vs ${w}`);
+  }
+  // the top disc stays on the top: no paint on the cube's far side
+  const b = after.baked(), P = b.mesh.positions, T = b.mesh.triangles;
+  for (let i = 0; i < T.length / 3; i++) {
+    if (b.faceMaterial[i] !== 1) continue;
+    const z = (P[T[i * 3] * 3 + 2] + P[T[i * 3 + 1] * 3 + 2] + P[T[i * 3 + 2] * 3 + 2]) / 3;
+    assert.ok(z > 12.9, `paint 1 at z ${z}`);
+  }
+  // onto a finer mesh of the same part, in place: the same colours, split along the old edges
+  const fine = new PaintModel(fromManifold(Manifold.cube([20, 20, 20], true).refine(4)));
+  fine.carryFrom(model);
+  const f = areas(fine);
+  for (const m of [1, 2]) {
+    const w = want.get(m) ?? 0;
+    assert.ok(Math.abs((f.get(m) ?? 0) - w) / w < 0.02, `fine, colour ${m}: ${f.get(m)} vs ${w}`);
+  }
+});

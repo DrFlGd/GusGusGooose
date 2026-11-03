@@ -13,7 +13,7 @@
       <nav class="tabs segmented" aria-label="Mode">
         <button data-tab="accessory" class="active">Accessory</button>
         <button data-tab="clothing">Clothing</button>
-        <button data-tab="paint" id="paint-tab-button" disabled title="Fit an accessory or make a garment first">Paint</button>
+        <button data-tab="paint" id="paint-tab-button" disabled title="Load an accessory or make a garment first">Paint</button>
         <button data-tab="hole">Hole</button>
       </nav>
       <div class="top-actions">
@@ -190,6 +190,15 @@
             <div class="row"><button id="move-mount" disabled>Move the magnet: click the model</button></div>
             <p id="mount-info" class="small muted">Auto sizes the puck to the magnet and the sink. Click Move, then the model where the magnet should be; Hide goose over the view shows the model on its own.</p>
           </details>
+          <div id="stand-row">
+            <div class="field"><span>Stands</span>
+              <select id="stand">
+                <option value="magnet">straight up from the magnet</option>
+                <option value="surface">leaning with the surface round it</option>
+              </select>
+            </div>
+            <p id="stand-info" class="small muted"></p>
+          </div>
           <div class="slider">
             <div class="slider-head"><span>Sink into the goose</span><span class="val"><input type="number" id="sink-num" step="0.5" min="0" max="15" /><span class="unit">mm</span></span></div>
             <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
