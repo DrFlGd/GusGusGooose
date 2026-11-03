@@ -13,7 +13,7 @@
 // fraction, angle and distance from the garment's own inner surface, and is
 // re-seated at that angle and height on the goose's drop-on profile.
 
-import type { Manifold as ManifoldT } from 'manifold-3d';
+import type { CrossSection as CrossSectionT, Manifold as ManifoldT } from 'manifold-3d';
 import type { IndexedMesh } from './stl.ts';
 import { fromManifold, manifold, toManifold } from './fit.ts';
 
@@ -302,6 +302,10 @@ export interface Cavity {
   front: number;
   /** the neck itself plus clearance and gap, per angle: what a collar tube hugs */
   neckRing: Float32Array;
+  /** the body as sampled, unswept, between hem and neck: 0 where the body is absent at that height and angle */
+  raw: BodyProfile;
+  /** heights the collar polygons are built from */
+  neckSpan: [number, number];
 }
 
 /** The space a garment between hem and neck must leave for the goose, and the collar opening. */
@@ -324,9 +328,11 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
     hole[i] = Math.min(top[i], Math.max(neckSlice[i] + o.clearance + (o.collarGap ?? 0), want));
   }
   const neckRing = Float32Array.from(neckSlice, (v) => v + o.clearance + (o.collarGap ?? 0));
+  const raw = clipProfile(p, o.hem, o.neck);
+  const neckSpan: [number, number] = o.collar === 'drop' ? [o.neck, goose.boundingBox().max[2]] : [o.neck, o.neck + 6];
   // the front is the body's centre line toward the head (the goose sits a little yawed in its project), not plain -y
   const front = (o.front !== undefined ? (o.front * Math.PI) / 180 : p.bodyDir ?? p.headDir ?? -Math.PI / 2) + ((o.frontOffset ?? 0) * Math.PI) / 180;
-  return { swept, inner, hole, headProjection, centre: [p.cx, p.cy], front, neckRing };
+  return { swept, inner, hole, headProjection, centre: [p.cx, p.cy], front, neckRing, raw, neckSpan };
 }
 
 /** Smallest signed angle difference, radians. */
@@ -362,6 +368,15 @@ function heightCutter(cx: number, cy: number, zOf: (theta: number) => number, N:
   return { positions: Float32Array.from(positions), triangles: Uint32Array.from(tris) };
 }
 
+/** The mesh as a Manifold with positive volume, flipping it if it came out inside out. */
+async function orient(m: IndexedMesh): Promise<ManifoldT> {
+  const man = await toManifold(m);
+  if (man.volume() >= 0) return man;
+  const tri = Uint32Array.from(m.triangles);
+  for (let i = 0; i < tri.length; i += 3) { const x = tri[i + 1]; tri[i + 1] = tri[i + 2]; tri[i + 2] = x; }
+  return toManifold({ positions: m.positions, triangles: tri });
+}
+
 /** A shirt, sweater or coat: a shell that follows the goose between hem and neck. */
 export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOptions> = {}): Promise<GarmentResult> {
   const o = { ...DEFAULT_GARMENT, ...opts };
@@ -372,22 +387,9 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
   const outer = offsetProfile(cav.swept, o.clearance + t);
   const K = cav.inner.z.length;
   const theta = (i: number) => (i / N) * Math.PI * 2;
-  // the collar plate sits on top of the cavity: two rings above the neck with the hole radius
-  const plateZ = [o.neck + 0.05, o.neck + t];
-  const innerZ = [...cav.inner.z, ...plateZ], innerR = [...cav.inner.r, Float32Array.from(cav.hole), Float32Array.from(cav.hole)];
-  const outerTop = outer.r[K - 1];
-  const outerZ = [...outer.z, ...plateZ], outerR = [...outer.r, Float32Array.from(outerTop), Float32Array.from(outerTop)];
-  // a collar tube hugging the neck above the plate
-  const collarH = o.collarHeight ?? 0;
-  if (collarH > 0) {
-    for (const z of [o.neck + t + 0.05, o.neck + t + collarH]) {
-      innerZ.push(z); innerR.push(Float32Array.from(cav.neckRing));
-      outerZ.push(z); outerR.push(Float32Array.from(cav.neckRing, (v) => v + t));
-    }
-  }
-  const inner: BodyProfile = { ...cav.inner, z: innerZ, r: innerR };
-  const out: BodyProfile = { ...outer, z: outerZ, r: outerR };
-  // surface: fabric texture, hem band and placket are small bumps on the outside, below the plate only
+  const inner: BodyProfile = cav.inner;
+  const out: BodyProfile = { ...outer, z: [...outer.z], r: outer.r.map((row) => Float32Array.from(row)) };
+  // surface: fabric texture, hem band and placket are small bumps on the outside
   const depth = o.fabricDepth ?? 0, pitch = o.fabricPitch ?? 48, band = o.hemBand ?? 0;
   for (let k = 0; k < K; k++) {
     const z = out.z[k];
@@ -404,7 +406,34 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
   for (let k = 0; k < inner.r.length; k++) for (let i = 0; i < N; i++) out.r[k][i] = Math.max(out.r[k][i], inner.r[k][i] + t);
   const mesh = loftShell(inner, out);
   let solid = await toManifold(mesh);
-  const topZ = innerZ[innerZ.length - 1];
+  // where the body ends below the neck height (behind the neck, the back slopes away), the garment ends too:
+  // cut the loft above the body's top surface at each angle, so nothing is drawn in toward the axis
+  const zTopAt = new Float32Array(N).fill(o.hem);
+  for (let k = 0; k < cav.raw.z.length; k++) for (let i = 0; i < N; i++) if (cav.raw.r[k][i] > 0) zTopAt[i] = cav.raw.z[k];
+  const smoothTop = Float32Array.from(zTopAt, (_, i) => Math.max(zTopAt[(i + N - 1) % N], zTopAt[i], zTopAt[(i + 1) % N]));
+  const bodyTopCut = heightCutter(cav.centre[0], cav.centre[1], (th) => {
+    const i = Math.round((th / (Math.PI * 2)) * N) % N;
+    return Math.min(o.neck, smoothTop[i] + (cav.raw.z[1] - cav.raw.z[0])) + t;
+  }, N, 0.01, 300, o.neck + 200);
+  solid = solid.subtract(await orient(bodyTopCut));
+  // the collar plate: the shoulders around the neck, as flat 2D shapes, so it is a ring around the neck and not a cone to the axis
+  const { CrossSection } = await manifold();
+  const shoulders = CrossSection.union([goose.slice(o.neck - 0.5), goose.slice(o.neck - 2)]).offset(o.clearance + t, 'Round', 2, 32);
+  const neckSlices: CrossSectionT[] = [];
+  for (let z = cav.neckSpan[0]; z <= cav.neckSpan[1]; z += 1) neckSlices.push(goose.slice(Math.min(z, cav.neckSpan[1] - 0.01)));
+  const neckHole = CrossSection.union(neckSlices).offset(o.clearance + (o.collarGap ?? 0), 'Round', 2, 32);
+  // the plate starts a little below the loft's top ring so the two always join; the body's cavity is carved out of it
+  const loftTop = cav.inner.z[cav.inner.z.length - 1];
+  let plate = Manifold.extrude(shoulders.subtract(neckHole), o.neck + t - (loftTop - 0.5)).translate(0, 0, loftTop - 0.5);
+  const cavityMesh = loftSolid({ ...cav.inner, z: cav.inner.z.map((z, k) => (k === 0 ? z - 5 : z)) });
+  plate = plate.subtract(await toManifold(cavityMesh));
+  solid = solid.add(plate);
+  const collarH = o.collarHeight ?? 0;
+  if (collarH > 0) {
+    const tube = Manifold.extrude(neckHole.offset(t, 'Round', 2, 32).subtract(neckHole), collarH).translate(0, 0, o.neck + t);
+    solid = solid.add(tube);
+  }
+  const topZ = o.neck + t + collarH;
   // neckline: cut the front down from the top edge
   const nd = o.necklineDepth ?? 0, nw = ((o.necklineWidth ?? 45) * Math.PI) / 180;
   if (o.neckline !== 'crew' && nd > 0 && nw > 0) {
@@ -413,15 +442,7 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
       const f = a >= nw ? 0 : o.neckline === 'v' ? 1 - a / nw : Math.cos((Math.PI / 2) * (a / nw));
       return topZ + 1 - f * (topZ + 1 - (o.neck - nd));
     };
-    const cutterMesh = heightCutter(cav.centre[0], cav.centre[1], zCut, N, 0.5, 300, topZ + 60);
-    let cutter = await toManifold(cutterMesh);
-    if (cutter.volume() < 0) {
-      // inside out: flip every triangle
-      const tri = Uint32Array.from(cutterMesh.triangles);
-      for (let i = 0; i < tri.length; i += 3) { const x = tri[i + 1]; tri[i + 1] = tri[i + 2]; tri[i + 2] = x; }
-      cutter = await toManifold({ positions: cutterMesh.positions, triangles: tri });
-    }
-    solid = solid.subtract(cutter);
+    solid = solid.subtract(await orient(heightCutter(cav.centre[0], cav.centre[1], zCut, N, 0.01, 300, topZ + 60)));
   }
   // buttons down the front
   const nb = Math.max(0, Math.round(o.buttons ?? 0));
@@ -439,6 +460,14 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
     }
     if (buttons.length) solid = solid.add(Manifold.union(buttons));
   }
+  const warnings: string[] = [];
+  // keep the garment itself: a sliver of plate left over a wing tip or a bump is not part of it
+  const bodies = solid.decompose().sort((a, b) => b.volume() - a.volume());
+  if (bodies.length > 1) {
+    const dropped = bodies.slice(1).reduce((v, b) => v + b.volume(), 0);
+    if (dropped > 1) warnings.push(`dropped ${bodies.length - 1} loose piece(s), ${dropped.toFixed(1)} mm³`);
+    solid = bodies[0];
+  }
   const result = fromManifold(solid);
   // stripes: paint by height band
   let faceMaterial: Uint8Array | undefined;
@@ -451,7 +480,6 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
       faceMaterial[f] = Math.floor((z - o.hem) / o.stripes) % 2 === 1 ? 1 : 0;
     }
   }
-  const warnings: string[] = [];
   const hemR = cav.inner.r[0];
   if (Math.min(...hemR) < t) warnings.push('the hem touches the axis; raise the hem');
   const holeW = 2 * Math.max(...cav.hole), headW = 2 * Math.max(...cav.headProjection);
@@ -571,7 +599,10 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     const d = mode === 'shell' ? rad[v] - rmin[idx] : o.thickness + rad[v] - rmax[idx];
     const z = zOf(u[v]);
     // 0.3 mm margin keeps the garment's inside clear of the carving solid, so the cut leaves no slivers or holes
-    const r = sampleInner(theta[v], z) + 0.3 + Math.max(d, mode === 'shell' ? 0 : -1e9);
+    // the goose pushes the garment out; where the body is absent at that height (behind the neck) the garment keeps its own scaled shape
+    const pushed = sampleInner(theta[v], z) + 0.3 + Math.max(d, mode === 'shell' ? 0 : -1e9);
+    const own = rad[v] * widthScale;
+    const r = Math.max(pushed, own);
     positions[v * 3] = inner.cx + r * Math.cos(theta[v]);
     positions[v * 3 + 1] = inner.cy + r * Math.sin(theta[v]);
     positions[v * 3 + 2] = z;
