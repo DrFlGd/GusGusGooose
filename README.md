@@ -31,9 +31,14 @@ a fit or a garment) brushes faces with a palette of your filament colours,
 with Refine to split the mesh for finer edges, Fill all and Undo, and
 exports a 3MF whose colour regions the slicer maps to filaments (STL stays
 for single-colour parts). Everything runs in the page; nothing is uploaded.
+Models that are not valid solids (edges shared by three faces, overlapping
+shells, holes) are rebuilt on a voxel grid on import, at a pitch chosen
+from their size or one you set (down to 0.3 mm for more detail, at the
+cost of a longer wait); the Clear buttons on the Accessory and Clothing
+tabs drop the loaded model and anything fitted, to start over.
 `npm run smoke` builds it and drives it headlessly (fit a puck, import a
-3MF, make a shirt, wrap it, cut a hole; screenshots in `smoke-out/`); it
-needs Playwright with Chromium available.
+3MF, make a shirt, wrap it, clear, cut a hole; screenshots in
+`smoke-out/`); it needs Playwright with Chromium available.
 
 Accessories are downloaded models, never built from primitives; see
 [accessories/README.md](accessories/README.md) for the library layout.
@@ -88,6 +93,9 @@ node src/cli.ts wrap --garment sweater.stl --hem 46 --neck 108 --out sweater.fit
 node src/cli.ts wrap --garment jacket.3mf --turn 10 --shift 0,-2 --band 5,60 --crop 0,0,0,8 --keep-top 25
 # a thin or noisy model: put a 1.2 mm smooth liner between it and the body, and open the collar 4 mm out from the neck
 node src/cli.ts wrap --garment polo.3mf --liner 1.2 --neck-spread 4 --neck-spread-height 15
+# a model that is not a valid solid is rebuilt on a voxel grid first (--voxel sets the pitch, --no-repair refuses it instead);
+# --smooth-model relaxes a rough mesh a few passes before wrapping
+node src/cli.ts wrap --garment puffer.3mf --voxel 0.3 --keep-top 22
 # two halves that clip on with 3 x 1 mm magnets, hugging the chest and tail (writes .a.stl and .b.stl as well)
 node src/cli.ts shirt --split sides --form-fit --split-magnets 3 --split-magnet-dia 3 --split-magnet-thick 1 --out shirt.stl
 

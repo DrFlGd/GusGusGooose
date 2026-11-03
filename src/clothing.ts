@@ -228,6 +228,34 @@ export function smoothProfile(p: BodyProfile, passes: number): BodyProfile {
   return { ...p, r };
 }
 
+/**
+ * The upper envelope of the profile over a window of about `mm` millimetres
+ * around each sample (a max filter). The goose is a sculpt with feather
+ * texture of a few tenths of a millimetre; a seat built straight on it
+ * copies that texture onto every garment. The envelope rides on the peaks
+ * instead, and smoothing it afterwards gives a clean surface that still
+ * clears the body everywhere.
+ */
+export function envelopeProfile(p: BodyProfile, mm: number, dz: number): BodyProfile {
+  if (mm <= 0) return p;
+  const kz = Math.max(1, Math.round(mm / dz));
+  const r = p.r.map((row, k) => {
+    const out = new Float32Array(p.nTheta);
+    for (let i = 0; i < p.nTheta; i++) {
+      // the angular window covers about `mm` at this radius
+      const ka = Math.min(p.nTheta >> 2, Math.max(1, Math.round((mm / Math.max(1, row[i])) * p.nTheta / (2 * Math.PI))));
+      let m = 0;
+      for (let j = Math.max(0, k - kz); j <= Math.min(p.r.length - 1, k + kz); j++) {
+        const src = p.r[j];
+        for (let a = -ka; a <= ka; a++) m = Math.max(m, src[(i + a + p.nTheta) % p.nTheta]);
+      }
+      out[i] = m;
+    }
+    return out;
+  });
+  return { ...p, r };
+}
+
 /** Minkowski sum of the (r, z) profile with a disc of radius d, per angle: a true-thickness offset on walls and shoulders alike. */
 export function offsetProfile(p: BodyProfile, d: number): BodyProfile {
   const r = p.r.map((row, k) => {
@@ -381,7 +409,9 @@ export function neckShear(goose: ManifoldT, o: GarmentOptions): Shear {
 /** Applies the shear (sign +1) or undoes it (sign -1). */
 export function shearManifold(m: ManifoldT, s: Shear, sign: 1 | -1): ManifoldT {
   if (!s.sx && !s.sy) return m;
-  return m.warp((v) => { v[0] += sign * s.sx * (v[2] - s.z0); v[1] += sign * s.sy * (v[2] - s.z0); });
+  // an affine transform, which Manifold applies lazily, rather than a per-vertex `warp` callback over a large mesh
+  const a = sign * s.sx, b = sign * s.sy;
+  return m.transform([1, 0, 0, 0, 0, 1, 0, 0, a, b, 1, 0, -a * s.z0, -b * s.z0, 0, 1]);
 }
 
 /** The space a garment between hem and neck must leave for the goose, and the collar opening. Measured in the sheared frame (see `shear`). */
@@ -404,10 +434,10 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
     const r = swept.r.map((row) => Float32Array.from(row));
     for (let k = 1; k < r.length; k++) for (let i = 0; i < nTheta; i++) if (r[k][i] <= 0) r[k][i] = r[k - 1][i];
     swept = { ...swept, r };
-    if (o.smooth) swept = maxProfile(smoothProfile(swept, o.smooth), swept);
+    if (o.smooth) swept = maxProfile(smoothProfile(envelopeProfile(swept, o.smooth, dz), o.smooth), swept);
   } else {
     swept = o.collar === 'drop' ? clipProfile(full, o.hem, o.neck) : sweepDown(clipProfile(p, o.hem, o.neck));
-    if (o.smooth) swept = maxProfile(sweepDown(smoothProfile(swept, o.smooth)), swept);
+    if (o.smooth) swept = maxProfile(sweepDown(smoothProfile(envelopeProfile(swept, o.smooth, dz), o.smooth)), swept);
   }
   let inner = offsetProfile(swept, o.clearance);
   const spread = o.neckSpread ?? 0, spreadH = Math.max(1, o.neckSpreadHeight ?? 15);
@@ -696,6 +726,74 @@ export interface WrapOptions extends GarmentOptions {
   garmentCrop?: [number, number, number, number];
   /** a smooth layer this thick between the body and the model, so a thin or noisy model has solid material behind it; the model moves out by the same amount */
   liner?: number;
+  /** passes of mesh smoothing on the model before it is stretched (0 = none): takes out fine surface texture, which a tall model squashed onto the body would otherwise show as crumple */
+  smoothModel?: number;
+}
+
+/**
+ * Taubin smoothing of a mesh: alternate shrinking and inflating Laplacian
+ * steps, so fine texture goes while the overall shape and size stay.
+ */
+export function smoothMesh(mesh: IndexedMesh, passes: number): IndexedMesh {
+  if (passes <= 0) return mesh;
+  const P = Float32Array.from(mesh.positions), T = mesh.triangles, nv = P.length / 3;
+  // neighbour lists as CSR
+  const deg = new Int32Array(nv + 1);
+  for (let i = 0; i < T.length; i += 3) { deg[T[i] + 1] += 2; deg[T[i + 1] + 1] += 2; deg[T[i + 2] + 1] += 2; }
+  for (let v = 1; v <= nv; v++) deg[v] += deg[v - 1];
+  const fill = Int32Array.from(deg.subarray(0, nv)), nb = new Int32Array(deg[nv]);
+  for (let i = 0; i < T.length; i += 3) {
+    const a = T[i], b = T[i + 1], c = T[i + 2];
+    nb[fill[a]++] = b; nb[fill[a]++] = c; nb[fill[b]++] = a; nb[fill[b]++] = c; nb[fill[c]++] = a; nb[fill[c]++] = b;
+  }
+  const Q = new Float32Array(P.length);
+  const step = (lambda: number) => {
+    for (let v = 0; v < nv; v++) {
+      const n = deg[v + 1] - deg[v];
+      if (!n) { Q[v * 3] = P[v * 3]; Q[v * 3 + 1] = P[v * 3 + 1]; Q[v * 3 + 2] = P[v * 3 + 2]; continue; }
+      let sx = 0, sy = 0, sz = 0;
+      for (let e = deg[v]; e < deg[v + 1]; e++) { const w = nb[e] * 3; sx += P[w]; sy += P[w + 1]; sz += P[w + 2]; }
+      Q[v * 3] = P[v * 3] + lambda * (sx / n - P[v * 3]);
+      Q[v * 3 + 1] = P[v * 3 + 1] + lambda * (sy / n - P[v * 3 + 1]);
+      Q[v * 3 + 2] = P[v * 3 + 2] + lambda * (sz / n - P[v * 3 + 2]);
+    }
+    P.set(Q);
+  };
+  for (let n = 0; n < passes; n++) { step(0.5); step(-0.53); }
+  return { positions: P, triangles: T };
+}
+
+/**
+ * Nearest and farthest crossing of a section's edges along rays from (cx, cy),
+ * per angle; angle i is measured in the turned frame (ray direction i - turn).
+ * Angles no edge crosses keep rmin = Infinity and rmax = 0.
+ */
+function radialExtents(polys: [number, number][][], cx: number, cy: number, N: number, turn: number, rmin: Float32Array, rmax: Float32Array) {
+  const twoPi = Math.PI * 2;
+  for (const poly of polys) {
+    for (let e = 0; e < poly.length; e++) {
+      const [px, py] = poly[e], [qx, qy] = poly[(e + 1) % poly.length];
+      const ax = px - cx, ay = py - cy, ex = qx - px, ey = qy - py;
+      // the turned angles the edge spans, as the shorter arc
+      const a0 = Math.atan2(ay, ax) + turn;
+      let da = Math.atan2(qy - cy, qx - cx) + turn - a0;
+      if (da > Math.PI) da -= twoPi; else if (da < -Math.PI) da += twoPi;
+      const lo = Math.min(a0, a0 + da), hi = Math.max(a0, a0 + da);
+      const i0 = Math.ceil((lo / twoPi) * N), i1 = Math.floor((hi / twoPi) * N);
+      for (let j = i0; j <= i1; j++) {
+        const i = ((j % N) + N) % N;
+        const ang = (i / N) * twoPi - turn, cs = Math.cos(ang), sn = Math.sin(ang);
+        const den = cs * ey - sn * ex;
+        if (Math.abs(den) < 1e-12) continue;
+        const s = (ax * sn - ay * cs) / den;
+        if (s < -1e-9 || s > 1 + 1e-9) continue;
+        const t = (ax * ey - ay * ex) / den;
+        if (t <= 0) continue;
+        if (t < rmin[i]) rmin[i] = t;
+        if (t > rmax[i]) rmax[i] = t;
+      }
+    }
+  }
 }
 
 /** The model's mean radius about an axis, over its height: what the wrap scales to the body's mean radius. */
@@ -789,13 +887,21 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   const trimmed = trimGarment(garment, o, warnings);
   garment = trimmed.garment;
   const { bb, gcx, gcy } = trimmed;
-  // split long edges first, or the straight triangles of a simple model would cut through the goose's curves once their corners are mapped
-  const maxEdge = Math.max(0.75, (bb.max[2] - bb.min[2]) / 30);
-  const g = fromManifold(garment.numTri() > 400000 ? garment : garment.refineToLength(maxEdge));
+  // split long edges first, or the straight triangles of a coarse part (sleeves, collars, floors on an otherwise fine model)
+  // would cut through the goose's curves and kink once their corners are mapped; fine parts are left as they are
+  const maxEdge = Math.min(3, Math.max(1, (bb.max[2] - bb.min[2]) / 50));
+  let refined = garment.refineToLength(maxEdge);
+  if (refined.numTri() > 3_000_000) refined = garment.refineToLength(maxEdge * 3);
+  const g = smoothMesh(fromManifold(refined), o.smoothModel ?? 0);
   const gz0 = bb.min[2], gh = bb.max[2] - bb.min[2];
   const N = inner.nTheta, bands = Math.max(8, Math.round(gh / 2));
-  // per (angle bin, height band): the garment's nearest and farthest radius
+  // per (angle, height band): the garment's nearest and farthest surface from its axis, measured on a section through
+  // the band's centre (exact, so a coarse or unevenly meshed inside does not leave gaps that would dent the seat)
   const rmin = new Float32Array(N * bands).fill(Infinity), rmax = new Float32Array(N * bands).fill(0);
+  for (let b = 0; b < bands; b++) {
+    const zb = gz0 + ((b + 0.5) / bands) * gh;
+    radialExtents(garment.slice(zb).toPolygons() as [number, number][][], gcx, gcy, N, turn, rmin.subarray(b * N, (b + 1) * N), rmax.subarray(b * N, (b + 1) * N));
+  }
   const nv = g.positions.length / 3;
   const theta = new Float32Array(nv), u = new Float32Array(nv), rad = new Float32Array(nv);
   for (let v = 0; v < nv; v++) {
@@ -803,11 +909,8 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     theta[v] = (Math.atan2(y, x) + turn + Math.PI * 4) % (Math.PI * 2);
     u[v] = Math.min(1, Math.max(0, (z - gz0) / gh));
     rad[v] = Math.hypot(x, y);
-    const bin = Math.floor(theta[v] / (Math.PI * 2) * N) % N, band = Math.min(bands - 1, Math.floor(u[v] * bands));
-    const idx = band * N + bin;
-    rmin[idx] = Math.min(rmin[idx], rad[v]); rmax[idx] = Math.max(rmax[idx], rad[v]);
   }
-  // a bin's inner reference is its wall, not a floor remnant or a stray bit near the axis: never less than 60% of its outer radius
+  // the inner reference is the wall, not a floor remnant or a stray bit near the axis: never less than 60% of the outer radius
   for (let i = 0; i < N * bands; i++) if (rmin[i] !== Infinity) rmin[i] = Math.max(rmin[i], 0.6 * rmax[i]);
   // fill empty bins from neighbours so every vertex has a reference
   for (let pass = 0; pass < N; pass++) {
@@ -824,10 +927,17 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   // shell or solid? a shell has an inner surface well inside its outer one over most bins
   let mode = o.mode;
   if (mode === 'auto') {
-    const ratios: number[] = [];
-    for (let i = 0; i < N * bands; i++) if (rmax[i] > 0 && rmin[i] !== Infinity) ratios.push((rmax[i] - rmin[i]) / rmax[i]);
-    ratios.sort((a, b) => a - b);
-    mode = ratios.length && ratios[Math.floor(ratios.length / 2)] < 0.5 ? 'shell' : 'solid';
+    // a shell has a cavity running up through it: most sections across the middle of its height are rings (more than one
+    // polygon, or well under their hull's area); a thick puffer is still a shell, a solid bust or dome is not
+    let rings = 0, total = 0;
+    for (let f = 0.2; f <= 0.8; f += 0.1) {
+      const cs = garment.slice(gz0 + f * gh);
+      const hull = cs.hull().area();
+      if (!hull) continue;
+      total++;
+      if (cs.toPolygons().length > 1 || cs.area() < 0.85 * hull) rings++;
+    }
+    mode = total && rings >= 0.6 * total ? 'shell' : 'solid';
   }
   const sampleInner = (th: number, zz: number) => {
     // bilinear in the profile: height index and angle index

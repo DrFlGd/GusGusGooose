@@ -214,13 +214,16 @@ let loadSerial = 0;
 /** Loads a model as the accessory; from the Clothing tab (`stay`) it is shown there as the wrap ghost instead of switching tabs. */
 async function loadFile(file: File, stay = false) {
   status(`Reading ${file.name}…`);
+  let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
-    const loaded = await loadModel(file.name, await file.arrayBuffer());
+    const voxel = $<HTMLInputElement>('repair-voxel').value;
+    loaded = await loadModel(file.name, await file.arrayBuffer(), { repair: $<HTMLInputElement>('repair-import').checked, voxel: voxel === '' ? undefined : Number(voxel) });
     rawModel = loaded.solid;
     rawName = file.name;
     const bb = rawModel.boundingBox();
     const size = bb.max.map((v, i) => (v - bb.min[i]).toFixed(1)).join(' × ');
-    $('model-info').textContent = `${file.name}: ${loaded.triangles.toLocaleString()} triangles${loaded.parts > 1 ? `, ${loaded.parts} parts joined` : ''}, ${size} mm as downloaded.`;
+    const repaired = loaded.repaired ? ` ${loaded.repaired.parts} part(s) were not valid solids and were rebuilt on a ${loaded.repaired.voxel.toFixed(2)} mm voxel grid.` : '';
+    $('model-info').textContent = `${file.name}: ${loaded.triangles.toLocaleString()} triangles${loaded.parts > 1 ? `, ${loaded.parts} parts joined` : ''}, ${size} mm as downloaded.${repaired}`;
   } catch (err) {
     status(`${file.name}: ${(err as Error).message}`);
     return;
@@ -231,13 +234,49 @@ async function loadFile(file: File, stay = false) {
   $<HTMLButtonElement>('wrap-garment').disabled = false;
   if (!(stay && tab === 'clothing')) setTab('accessory');
   await applyPrepare();
-  $('cloth-model').textContent = `${file.name} is loaded and ready to wrap.`;
+  $('cloth-model').textContent = `${file.name} is loaded and ready to wrap.${loaded.repaired ? ' It was rebuilt on a voxel grid on import.' : ''}`;
+  updateClearButtons();
   if (tab === 'clothing') wrapPreview();
 }
 $<HTMLInputElement>('cloth-file').onchange = (e) => {
   const f = (e.target as HTMLInputElement).files?.[0];
   if (f) loadFile(f, true);
 };
+
+/** Forgets the loaded model and any fitted part or garment, back to the bare goose, so another model can be started from scratch. */
+function clearModel() {
+  clearFitted();
+  rawModel = null;
+  rawName = '';
+  baseManifold = null;
+  accessoryManifold = null;
+  accessoryMesh = null;
+  garmentParts = null;
+  loadSerial++;
+  if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); accessoryObject = null; }
+  if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost = null; cropKey = ''; }
+  for (const id of ['accessory-file', 'cloth-file']) $<HTMLInputElement>(id).value = ''; // so the same file can be loaded again
+  $('prepare-controls').classList.add('hidden');
+  $('accessory-controls').classList.add('hidden');
+  $('model-info').textContent = '';
+  $('cloth-model').textContent = 'No model loaded; Make shirt needs none.';
+  $('cloth-result').textContent = '';
+  $<HTMLButtonElement>('wrap-garment').disabled = true;
+  updateClearButtons();
+  updatePreview();
+  status('Cleared. Load another model, or make a shirt.');
+}
+/** The Clear buttons are live when there is something to clear: a loaded model or a fitted part. */
+function updateClearButtons() {
+  const something = !!rawModel || !!fittedObject;
+  for (const id of ['clear-model', 'clear-cloth']) {
+    const b = $<HTMLButtonElement>(id);
+    b.disabled = !something;
+    b.title = something ? '' : 'Nothing to clear';
+  }
+}
+$('clear-model').onclick = clearModel;
+$('clear-cloth').onclick = clearModel;
 
 /** Re-runs the prepare step on the loaded model and shows it as the accessory. */
 async function applyPrepare() {
@@ -443,6 +482,7 @@ function showFitted(mesh: IndexedMesh) {
   hideGhost();
   $<HTMLButtonElement>('paint-tab-button').disabled = false;
   $('paint-info').textContent = `${(mesh.triangles.length / 3).toLocaleString()} faces.`;
+  updateClearButtons();
 }
 
 $('fit').onclick = async () => {
@@ -588,7 +628,7 @@ function garmentOptions(): Partial<WrapOptions> {
     hemBand: num('cloth-hem-band'), stripes: num('cloth-stripes'), axisToNeck: num('cloth-lean'),
     split: $<HTMLSelectElement>('cloth-split').value as GarmentOptions['split'], formFit: $<HTMLInputElement>('cloth-form-fit').checked,
     splitMagnets: num('cloth-split-magnets'), splitMagnetDiameter: num('cloth-split-magnet-dia'), splitMagnetThickness: num('cloth-split-magnet-thick'),
-    keepTop: num('cloth-keep-top'), liner: num('cloth-liner'), garmentTurn: num('wrap-turn'), garmentShift: [num('wrap-dx'), num('wrap-dy')],
+    keepTop: num('cloth-keep-top'), liner: num('cloth-liner'), smoothModel: num('cloth-smooth-model'), garmentTurn: num('wrap-turn'), garmentShift: [num('wrap-dx'), num('wrap-dy')],
     garmentBand: [num('wrap-band-lo'), $<HTMLInputElement>('wrap-band-hi').value === '' ? Infinity : num('wrap-band-hi')],
     garmentCrop: [num('wrap-crop-l'), num('wrap-crop-r'), num('wrap-crop-f'), num('wrap-crop-b')],
   };

@@ -55,3 +55,26 @@ test('loadModel reads STL, OBJ and 3MF to one solid', async () => {
   assert.equal(bambu.parts, 3);
   assert.ok(bambu.solid.volume() > 100000, 'goose body volume');
 });
+
+test('a mesh that is not a valid solid is rebuilt on a voxel grid on import', async () => {
+  const { manifold, fromManifold } = await import('../src/fit.ts');
+  const { serializeStl } = await import('../src/stl.ts');
+  const { loadModel } = await import('../src/load-model.ts');
+  const { Manifold } = await manifold();
+  // a box with its +x side missing: an open mesh with a hole
+  const box = fromManifold(Manifold.cube([20, 20, 20], true));
+  const keep: number[] = [];
+  for (let t = 0; t < box.triangles.length; t += 3) {
+    const xs = [0, 1, 2].map((k) => box.positions[box.triangles[t + k] * 3]);
+    if (!xs.every((x) => x > 9.9)) keep.push(box.triangles[t], box.triangles[t + 1], box.triangles[t + 2]);
+  }
+  assert.equal(keep.length, box.triangles.length - 6);
+  const soup = serializeStl({ positions: box.positions, triangles: Uint32Array.from(keep) });
+  await assert.rejects(loadModel('soup.stl', soup, { repair: false }));
+  const fixed = await loadModel('soup.stl', soup, { voxel: 0.5 });
+  assert.ok(fixed.repaired && fixed.repaired.parts === 1);
+  assert.equal(fixed.solid.status(), 'NoError');
+  // the closed box is 8000 mm³; the voxel surface is within a few percent
+  assert.ok(Math.abs(fixed.solid.volume() - 8000) < 500, `volume ${fixed.solid.volume()}`);
+  assert.equal(fixed.solid.decompose().length, 1);
+});

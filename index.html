@@ -24,6 +24,8 @@
           <input type="file" id="accessory-file" accept=".stl,.obj,.3mf" />
           <span>Load a model (STL, OBJ or 3MF), or drop it on the view</span>
         </label>
+        <div class="row"><button id="clear-model" disabled title="Nothing loaded">Clear model</button></div>
+        <label class="check"><input type="checkbox" id="repair-import" checked /> Repair models that are not valid solids on import (rebuilt on a voxel grid of <input type="number" id="repair-voxel" step="0.1" min="0.3" max="3" value="" placeholder="auto" /> mm, down to 0.3 for more detail at the cost of a longer wait; details smaller than that are lost)</label>
         <div id="prepare-controls" class="hidden">
           <p id="model-info" class="small muted"></p>
           <label>Side that meets the goose
@@ -110,6 +112,7 @@
           <span>Load a model to wrap (STL, OBJ or 3MF), or drop it on the view</span>
         </label>
         <p id="cloth-model" class="small muted">No model loaded; Make shirt needs none.</p>
+        <div class="row"><button id="clear-cloth" disabled title="Nothing to clear">Clear model and garment</button></div>
         <label>Hem height <output id="cloth-hem-out">46</output> mm
           <input type="range" id="cloth-hem" min="10" max="150" step="1" value="46" />
         </label>
@@ -187,6 +190,7 @@
           <label>Crop its sides: left <input type="number" id="wrap-crop-l" step="1" min="0" value="0" /> right <input type="number" id="wrap-crop-r" step="1" min="0" value="0" /> front <input type="number" id="wrap-crop-f" step="1" min="0" value="0" /> back <input type="number" id="wrap-crop-b" step="1" min="0" value="0" /> mm</label>
           <label>Keep the top <input type="number" id="cloth-keep-top" step="1" min="0" value="30" /> mm of the model in proportion (collar, hood); the rest stretches to the hem</label>
           <label>Liner <input type="number" id="cloth-liner" step="0.1" min="0" value="0" /> mm: a smooth layer between the body and the model, for thin or noisy models (moves the model out by as much)</label>
+          <label>Smooth the model <input type="number" id="cloth-smooth-model" step="1" min="0" max="10" value="0" /> passes before stretching: removes fine surface texture (knit, noise), which stands out once a tall model is squashed onto the body</label>
           <p class="muted small">A closed bottom (pen pots) is cut off automatically. Pen-pot shirts, hoodies and jackets work well; sleeves come along as bumps.</p>
         </details>
         <div class="row">

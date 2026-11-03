@@ -164,8 +164,13 @@ knit) has solid material behind it instead of slivers where the carve
 grazes it. The front is oriented by the lean itself, not by where the head
 sits in the sheared frame, where it can end up behind the axis. The
 model's reference radii (its own inner and outer surface per angle and
-height band) are read with bilinear interpolation, so the seat does not
-step from band to band, which showed as horizontal stripes. A *neck
+height band) are measured on exact sections through each band's centre
+and read with bilinear interpolation, so the seat does not step from band
+to band (horizontal stripes) or crumple where a band had few vertices
+(the polo's chest). Coarse parts of a model (sleeves, collars) are
+refined before mapping so their long triangles do not kink. Whether a
+model is a shell or a solid is read from its sections too: a shell has
+rings through most of its height. A *neck
 spread* opens the collar out from the neck and chest by a set amount,
 blended in over the top of the garment, for shirts and wraps alike.
 
@@ -177,6 +182,19 @@ added on the outside of the seam first. Because the halves clip on, the
 drop-on constraint can be dropped: the *form fit* option follows the body
 as it is, into the chest and under the tail, with only the clearance
 around it.
+
+**Repair on import (Jerred, 2026-11-03).** A model that Manifold refuses
+(the old puffer: edges shared by three faces) is rasterised into a voxel
+grid by ray winding, blurred once, and its surface re-extracted with
+Manifold's level-set marcher, then simplified by a third of a voxel so the
+rebuilt mesh is not ten times heavier than it needs to be. The pitch
+defaults to about 1/160 of the model's size (0.4 to 1.5 mm) and can be set
+down to 0.3 mm for more detail (about 40 s for the puffer). Hollowing the
+stretched rebuild then crashed inside manifold-3d 3.1.1 ("memory access out
+of bounds" in the boolean, erratically, depending on the exact meshes);
+3.5.4 does the same boolean in under a second, so the dependency was
+bumped. The shear is applied as an affine transform rather than a
+per-vertex warp callback, which is cheaper on large meshes.
 
 ## Still needed from Jerred
 

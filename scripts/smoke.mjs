@@ -135,6 +135,13 @@ console.log('7e. exported halves', halves.join(', '));
 if (halves.length !== 2) throw new Error(`expected two half files, got ${halves.length}`);
 await page.selectOption('#cloth-split', 'none');
 await page.uncheck('#cloth-form-fit');
+// clear: the loaded model and the garment go, the wrap and paint buttons lock, and the Clear buttons go quiet
+await page.click('#clear-cloth');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Cleared'), null, { timeout: 5000 });
+const cleared = await page.evaluate(() => [document.getElementById('wrap-garment').disabled, document.getElementById('paint-tab-button').disabled, document.getElementById('clear-model').disabled, document.getElementById('cloth-model').textContent]);
+console.log('7f. cleared:', cleared.join(' | '));
+if (!cleared[0] || !cleared[1] || !cleared[2]) throw new Error('clear left a button live');
+await page.screenshot({ path: join(out, '7f-cleared.png') });
 
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
