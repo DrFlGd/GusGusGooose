@@ -7,7 +7,7 @@
 //   node src/cli.ts shirt [--hem 46] [--neck 108] [--thickness 1.6] [--clearance 0.4] [--collar tilt|drop] [--collar-gap 1]
 //                         [--neckline v|scoop|crew --neckline-depth 14 --neckline-width 45] [--collar-height 0] [--fabric plain|ribbed|puffer --fabric-depth 0.4 --fabric-pitch 48]
 //                         [--buttons 0 --button-dia 3 --placket] [--hem-band 0] [--stripes 0] [--out shirt.stl]
-//   node src/cli.ts wrap --garment sweater.3mf [--mode auto|shell|solid] [--keep-top 30] [--floor auto|0] [--turn 15] [--shift 2,-1] [--band 10,60] [--crop left,right,front,back] [--axis-to-neck 1] [--split sides|front-back --form-fit --split-magnets 3 --split-magnet-dia 3 --split-magnet-thick 1] [--hem 46 --neck 108 ...] [--out sweater.fitted.stl]
+//   node src/cli.ts wrap --garment sweater.3mf [--mode auto|shell|solid] [--keep-top 30] [--floor auto|0] [--turn 15] [--shift 2,-1] [--band 10,60] [--crop left,right,front,back] [--liner 1.2] [--axis-to-neck 1] [--split sides|front-back --form-fit --split-magnets 3 --split-magnet-dia 3 --split-magnet-thick 1] [--hem 46 --neck 108 ...] [--out sweater.fitted.stl]
 //
 // `detect` finds the magnet voids in the goose and writes the fit profile.
 // `fit` uses that profile to carve and pocket an accessory.
@@ -168,7 +168,7 @@ async function wrap() {
   const o = {
     ...DEFAULT_GARMENT, ...garmentArgs(), mode: (arg('mode', 'auto') as 'auto' | 'shell' | 'solid'), keepTop: Number(arg('keep-top', '0')),
     floor: arg('floor') === undefined ? 'auto' as const : Number(arg('floor')),
-    garmentTurn: Number(arg('turn', '0')), garmentShift: pair('shift'), garmentBand: pair('band'),
+    garmentTurn: Number(arg('turn', '0')), garmentShift: pair('shift'), garmentBand: pair('band'), liner: Number(arg('liner', '0')),
     garmentCrop: arg('crop') === undefined ? undefined : arg('crop')!.split(',').map(Number) as [number, number, number, number],
   };
   const t0 = performance.now();

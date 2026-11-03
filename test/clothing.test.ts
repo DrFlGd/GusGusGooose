@@ -77,6 +77,12 @@ test('the axis leans to the neck, and the preview frame lands the model between 
     const top = g.solid.slice(64.5).toPolygons().flat();
     return top.reduce((a, p) => a + p[1], 0) / top.length;
   };
+  // the front stays the front (the bird faces -y) whatever the lean
+  for (const axisToNeck of [0, 0.5, 1]) {
+    const deg = (cavityProfile(goose, { hem: 25, neck: 65, axisToNeck }).front * 180) / Math.PI;
+    const off = ((deg + 90 + 540) % 360) - 180; // signed difference from -90
+    assert.ok(Math.abs(off) < 20, `front ${deg} degrees with lean ${axisToNeck}`);
+  }
   const leaned = await collarY(1), straight = await collarY(0);
   assert.ok(leaned < straight - 3, `collar centre y: leaned ${leaned}, straight ${straight}`);
   const g = await wrapGarment(sweater, goose, { hem: 25, neck: 65, thickness: 1.5, clearance: 0.4 });
@@ -87,6 +93,11 @@ test('the axis leans to the neck, and the preview frame lands the model between 
   assert.ok(Math.abs(f.heightScale - 2) < 1e-6, `height scale ${f.heightScale}`);
   const cropped = await wrapGarment(sweater, goose, { hem: 25, neck: 65, garmentBand: [5, 25], garmentCrop: [0, 0, 0, 10] });
   assert.ok(cropped.solid.volume() > 0 && cropped.solid.volume() < g.solid.volume());
+  // a liner adds a smooth layer under the model: more material, still clear of the body, one piece
+  const lined = await wrapGarment(sweater, goose, { hem: 25, neck: 65, thickness: 1.5, clearance: 0.4, liner: 1.2 });
+  assert.ok(lined.solid.volume() > g.solid.volume() * 1.3, `lined ${lined.solid.volume()} vs plain ${g.solid.volume()}`);
+  assert.ok(lined.solid.intersect(goose).volume() < 2, 'liner overlaps the body');
+  assert.equal(lined.solid.decompose().length, 1);
 });
 
 test('a split form-fit shirt comes as two halves with magnet pockets', async () => {

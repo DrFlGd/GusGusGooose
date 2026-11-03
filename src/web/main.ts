@@ -578,7 +578,7 @@ function garmentOptions(): Partial<WrapOptions> {
     hemBand: num('cloth-hem-band'), stripes: num('cloth-stripes'), axisToNeck: num('cloth-lean'),
     split: $<HTMLSelectElement>('cloth-split').value as GarmentOptions['split'], formFit: $<HTMLInputElement>('cloth-form-fit').checked,
     splitMagnets: num('cloth-split-magnets'), splitMagnetDiameter: num('cloth-split-magnet-dia'), splitMagnetThickness: num('cloth-split-magnet-thick'),
-    keepTop: num('cloth-keep-top'), garmentTurn: num('wrap-turn'), garmentShift: [num('wrap-dx'), num('wrap-dy')],
+    keepTop: num('cloth-keep-top'), liner: num('cloth-liner'), garmentTurn: num('wrap-turn'), garmentShift: [num('wrap-dx'), num('wrap-dy')],
     garmentBand: [num('wrap-band-lo'), $<HTMLInputElement>('wrap-band-hi').value === '' ? Infinity : num('wrap-band-hi')],
     garmentCrop: [num('wrap-crop-l'), num('wrap-crop-r'), num('wrap-crop-f'), num('wrap-crop-b')],
   };

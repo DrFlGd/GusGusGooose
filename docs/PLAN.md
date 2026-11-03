@@ -158,6 +158,11 @@ profile, clearance and collar all work as before.
 will put it (turned to face the front, scaled to the body's mean radius,
 leaned), and can be turned about its axis, shifted, limited to a band of
 its height and cropped on each side before wrapping; the rest is cut away.
+A *liner* puts a smooth shell of the body's drop-on shape under the model,
+moving it out by the same amount, so a thin or noisy mesh (the polo's fine
+knit) has solid material behind it instead of slivers where the carve
+grazes it. The front is oriented by the lean itself, not by where the head
+sits in the sheared frame, where it can end up behind the axis.
 
 **Split halves (Jerred, 2026-11-03).** Any garment can be cut in two along
 a plane through the leaned axis, left/right or front/back, with disc-magnet

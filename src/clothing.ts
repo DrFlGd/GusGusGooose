@@ -113,7 +113,7 @@ export const DEFAULT_GARMENT: GarmentOptions = {
 };
 
 /** Samples the goose as a radial profile from `zMin` to the top of the model. */
-export function bodyProfile(goose: ManifoldT, zMin: number, dz: number, nTheta: number, centre?: [number, number], zRef?: [number, number]): BodyProfile {
+export function bodyProfile(goose: ManifoldT, zMin: number, dz: number, nTheta: number, centre?: [number, number], zRef?: [number, number], frontHint?: number): BodyProfile {
   const bb = goose.boundingBox();
   const zs: number[] = [];
   for (let z = zMin; z < bb.max[2] - 0.05; z += dz) zs.push(z);
@@ -151,7 +151,9 @@ export function bodyProfile(goose: ManifoldT, zMin: number, dz: number, nTheta: 
   let bodyDir: number | undefined;
   if (sxx + syy > 0) {
     bodyDir = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-    if (headDir !== undefined && Math.abs(angleDiff(bodyDir, headDir)) > Math.PI / 2) bodyDir += Math.PI;
+    // pointed toward the head: by the hint when given (in a sheared frame the head itself can end up behind the axis)
+    const toward = frontHint ?? headDir;
+    if (toward !== undefined && Math.abs(angleDiff(bodyDir, toward)) > Math.PI / 2) bodyDir += Math.PI;
   }
   const cos = new Float64Array(nTheta), sin = new Float64Array(nTheta);
   for (let i = 0; i < nTheta; i++) { const a = (i / nTheta) * Math.PI * 2; cos[i] = Math.cos(a); sin[i] = Math.sin(a); }
@@ -386,7 +388,9 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
   const shear = neckShear(goose, o);
   goose = shearManifold(goose, shear, -1);
   // with a lean, the axis is the line through the body's centre at the hem and the neck's centre, which the shear has made vertical
-  const p = bodyProfile(goose, o.hem, dz, nTheta, o.centre ?? ((shear.sx || shear.sy) ? shear.axis : undefined), [o.hem, o.neck]);
+  const leaning = !!(shear.sx || shear.sy);
+  // the neck is forward of the body's centre at the hem, so the lean itself says which way the front is
+  const p = bodyProfile(goose, o.hem, dz, nTheta, o.centre ?? (leaning ? shear.axis : undefined), [o.hem, o.neck], leaning ? Math.atan2(shear.sy, shear.sx) : undefined);
   const full = sweepDown(p); // everything above each height, head included
   const kNeck = p.z.findIndex((z) => z >= o.neck - 1e-6);
   const headProjection = full.r[Math.min(kNeck < 0 ? p.z.length - 1 : kNeck, p.z.length - 1)];
@@ -415,7 +419,7 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
   const raw = clipProfile(p, o.hem, o.neck);
   const neckSpan: [number, number] = o.collar === 'drop' ? [o.neck, goose.boundingBox().max[2]] : [o.neck, o.neck + 6];
   // the front is the body's centre line toward the head (the goose sits a little yawed in its project), not plain -y
-  const front = (o.front !== undefined ? (o.front * Math.PI) / 180 : p.bodyDir ?? p.headDir ?? -Math.PI / 2) + ((o.frontOffset ?? 0) * Math.PI) / 180;
+  const front = (o.front !== undefined ? (o.front * Math.PI) / 180 : p.bodyDir ?? (leaning ? Math.atan2(shear.sy, shear.sx) : p.headDir) ?? -Math.PI / 2) + ((o.frontOffset ?? 0) * Math.PI) / 180;
   return { swept, inner, hole, headProjection, centre: [p.cx, p.cy], front, neckRing, raw, neckSpan, shear };
 }
 
@@ -535,6 +539,24 @@ export async function splitGarment(solid: ManifoldT, cav: Pick<Cavity, 'centre' 
   return { solid, parts };
 }
 
+/**
+ * A solid covering everything above the body's top surface at each angle
+ * (plus `t`), capped at the neck height: subtracting it cuts a loft off
+ * where the body slopes away behind the neck, so nothing is drawn in toward
+ * the axis there.
+ */
+function aboveBodyCutter(cav: Cavity, o: GarmentOptions, t: number): IndexedMesh {
+  const N = cav.raw.nTheta;
+  const zTopAt = new Float32Array(N).fill(o.hem);
+  for (let k = 0; k < cav.raw.z.length; k++) for (let i = 0; i < N; i++) if (cav.raw.r[k][i] > 0) zTopAt[i] = cav.raw.z[k];
+  const smoothTop = Float32Array.from(zTopAt, (_, i) => Math.max(zTopAt[(i + N - 1) % N], zTopAt[i], zTopAt[(i + 1) % N]));
+  const dz = cav.raw.z.length > 1 ? cav.raw.z[1] - cav.raw.z[0] : 1;
+  return heightCutter(cav.centre[0], cav.centre[1], (th) => {
+    const i = Math.round((th / (Math.PI * 2)) * N) % N;
+    return Math.min(o.neck, smoothTop[i] + dz) + t;
+  }, N, 0.01, 300, o.neck + 200);
+}
+
 /** A shirt, sweater or coat: a shell that follows the goose between hem and neck. */
 export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOptions> = {}): Promise<GarmentResult> {
   const o = { ...DEFAULT_GARMENT, ...opts };
@@ -565,16 +587,8 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
   for (let k = 0; k < inner.r.length; k++) for (let i = 0; i < N; i++) out.r[k][i] = Math.max(out.r[k][i], inner.r[k][i] + t);
   const mesh = loftShell(inner, out);
   let solid = await toManifold(mesh);
-  // where the body ends below the neck height (behind the neck, the back slopes away), the garment ends too:
-  // cut the loft above the body's top surface at each angle, so nothing is drawn in toward the axis
-  const zTopAt = new Float32Array(N).fill(o.hem);
-  for (let k = 0; k < cav.raw.z.length; k++) for (let i = 0; i < N; i++) if (cav.raw.r[k][i] > 0) zTopAt[i] = cav.raw.z[k];
-  const smoothTop = Float32Array.from(zTopAt, (_, i) => Math.max(zTopAt[(i + N - 1) % N], zTopAt[i], zTopAt[(i + 1) % N]));
-  const bodyTopCut = heightCutter(cav.centre[0], cav.centre[1], (th) => {
-    const i = Math.round((th / (Math.PI * 2)) * N) % N;
-    return Math.min(o.neck, smoothTop[i] + (cav.raw.z[1] - cav.raw.z[0])) + t;
-  }, N, 0.01, 300, o.neck + 200);
-  solid = solid.subtract(await orient(bodyTopCut));
+  // where the body ends below the neck height (behind the neck, the back slopes away), the garment ends too
+  solid = solid.subtract(await orient(aboveBodyCutter(cav, o, t)));
   // the collar plate: the shoulders around the neck, as flat 2D shapes, so it is a ring around the neck and not a cone to the axis
   const { CrossSection } = await manifold();
   const shoulders = CrossSection.union([goose.slice(o.neck - 0.5), goose.slice(o.neck - 2)]).offset(o.clearance + t, 'Round', 2, 32);
@@ -668,6 +682,8 @@ export interface WrapOptions extends GarmentOptions {
   garmentBand?: [number, number];
   /** mm cut off the model's sides in its own frame: [left (-x), right (+x), front (-y), back (+y)] */
   garmentCrop?: [number, number, number, number];
+  /** a smooth layer this thick between the body and the model, so a thin or noisy model has solid material behind it; the model moves out by the same amount */
+  liner?: number;
 }
 
 /** The model's mean radius about an axis, over its height: what the wrap scales to the body's mean radius. */
@@ -822,6 +838,7 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     if (keepTop <= 0 || fromTop <= keepTop) return o.neck - fromTop * (keepTop > 0 ? keptHeight / keepTop : (o.neck - o.hem) / gh);
     return o.neck - keptHeight - ((fromTop - keepTop) / Math.max(1e-6, gh - keepTop)) * (o.neck - o.hem - keptHeight);
   };
+  const liner = Math.max(0, o.liner ?? 0);
   const positions = new Float32Array(g.positions.length);
   for (let v = 0; v < nv; v++) {
     const bin = Math.floor(theta[v] / (Math.PI * 2) * N) % N, band = Math.min(bands - 1, Math.floor(u[v] * bands));
@@ -830,8 +847,8 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     const z = zOf(u[v]);
     // 0.3 mm margin keeps the garment's inside clear of the carving solid, so the cut leaves no slivers or holes
     // the goose pushes the garment out; where the body is absent at that height (behind the neck) the garment keeps its own scaled shape
-    const pushed = sampleInner(theta[v], z) + 0.3 + Math.max(d, mode === 'shell' ? 0 : -1e9);
-    const own = rad[v] * widthScale;
+    const pushed = sampleInner(theta[v], z) + 0.3 + liner + Math.max(d, mode === 'shell' ? 0 : -1e9);
+    const own = rad[v] * widthScale + liner;
     const r = Math.max(pushed, own);
     positions[v * 3] = inner.cx + r * Math.cos(theta[v]);
     positions[v * 3 + 1] = inner.cy + r * Math.sin(theta[v]);
@@ -846,7 +863,14 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   // hollow it with the drop-on solid, extended below the hem and above the neck so the cut is clean
   const core = clipProfile(inner, o.hem, o.neck);
   const coreMesh = loftSolid({ ...core, z: core.z.map((z, k) => (k === 0 ? z - 5 : k === core.z.length - 1 ? z + 5 : z)) });
-  const carved = shearManifold(solid.subtract(await toManifold(coreMesh)), shear, 1);
+  let hollow = solid.subtract(await toManifold(coreMesh));
+  if (liner > 0) {
+    // the liner: a smooth shell from the clearance surface out to where the model now sits, cut off where the body ends behind the neck
+    let shell = await toManifold(loftShell(core, offsetProfile(core, liner + 0.35)));
+    shell = shell.subtract(await orient(aboveBodyCutter(cav, o, liner + 0.35)));
+    hollow = hollow.add(shell);
+  }
+  const carved = shearManifold(hollow, shear, 1);
   const bodies = carved.decompose().filter((b) => b.volume() > 1);
   let result = bodies.length > 1 ? Manifold.union(bodies) : bodies[0] ?? carved;
   if (bodies.length !== 1) warnings.push(`${bodies.length} separate pieces after hollowing`);
