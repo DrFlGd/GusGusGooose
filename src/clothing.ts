@@ -23,6 +23,8 @@ export interface BodyProfile {
   cy: number;
   /** direction from the axis to whatever is above the reference range (the head), radians; undefined if nothing is there */
   headDir?: number;
+  /** the body's long axis in the reference range (its centre line), radians, pointed toward the head when known */
+  bodyDir?: number;
   /** sample heights, ascending */
   z: number[];
   /** radius per [height][angle], mm; 0 where the goose is absent */
@@ -121,6 +123,17 @@ export function bodyProfile(goose: ManifoldT, zMin: number, dz: number, nTheta: 
     cy = sa ? sy / sa : (bb.min[1] + bb.max[1]) / 2;
   }
   const headDir = ha ? Math.atan2(hy / ha - cy, hx / ha - cx) : undefined;
+  // the body's long axis: principal direction of the section outlines about the axis
+  let sxx = 0, sxy = 0, syy = 0;
+  zs.forEach((z, k) => {
+    if (zRef && (z < zRef[0] || z > zRef[1])) return;
+    for (const poly of slices[k][0]) for (const [x, y] of poly) { const dx = x - cx, dy = y - cy; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+  });
+  let bodyDir: number | undefined;
+  if (sxx + syy > 0) {
+    bodyDir = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    if (headDir !== undefined && Math.abs(angleDiff(bodyDir, headDir)) > Math.PI / 2) bodyDir += Math.PI;
+  }
   const cos = new Float64Array(nTheta), sin = new Float64Array(nTheta);
   for (let i = 0; i < nTheta; i++) { const a = (i / nTheta) * Math.PI * 2; cos[i] = Math.cos(a); sin[i] = Math.sin(a); }
   const twoPi = Math.PI * 2;
@@ -153,7 +166,7 @@ export function bodyProfile(goose: ManifoldT, zMin: number, dz: number, nTheta: 
   // a ring takes the widest of its own band and the band below, so the straight
   // loft between two rings never cuts inside the goose
   for (let k = r.length - 1; k > 0; k--) for (let i = 0; i < nTheta; i++) r[k][i] = Math.max(r[k][i], r[k - 1][i]);
-  return { cx, cy, headDir, z: zs, r, nTheta };
+  return { cx, cy, headDir, bodyDir, z: zs, r, nTheta };
 }
 
 function polygonCentroid(poly: [number, number][]) {
@@ -311,7 +324,8 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
     hole[i] = Math.min(top[i], Math.max(neckSlice[i] + o.clearance + (o.collarGap ?? 0), want));
   }
   const neckRing = Float32Array.from(neckSlice, (v) => v + o.clearance + (o.collarGap ?? 0));
-  const front = (o.front !== undefined ? (o.front * Math.PI) / 180 : p.headDir ?? -Math.PI / 2) + ((o.frontOffset ?? 0) * Math.PI) / 180;
+  // the front is the body's centre line toward the head (the goose sits a little yawed in its project), not plain -y
+  const front = (o.front !== undefined ? (o.front * Math.PI) / 180 : p.bodyDir ?? p.headDir ?? -Math.PI / 2) + ((o.frontOffset ?? 0) * Math.PI) / 180;
   return { swept, inner, hole, headProjection, centre: [p.cx, p.cy], front, neckRing };
 }
 
@@ -477,8 +491,10 @@ export function floorHeight(garment: ManifoldT): number {
 export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Partial<WrapOptions> = {}): Promise<GarmentResult & { mode: 'shell' | 'solid' }> {
   const o = { ...DEFAULT_GARMENT, mode: 'auto' as const, keepTop: 0, floor: 'auto' as const, ...opts };
   const { Manifold } = await manifold();
-  const { inner } = cavityProfile(goose, o);
+  const { inner, front } = cavityProfile(goose, o);
   const warnings: string[] = [];
+  // the garment faces -y in its own frame; turn it so that lands on the goose's front
+  const turn = front + Math.PI / 2;
   // pen pots and vases have a closed bottom: cut it off so the garment is open at the hem
   const floor = o.floor === 'auto' ? floorHeight(garment) : o.floor;
   if (floor > 0) {
@@ -498,7 +514,7 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   const theta = new Float32Array(nv), u = new Float32Array(nv), rad = new Float32Array(nv);
   for (let v = 0; v < nv; v++) {
     const x = g.positions[v * 3] - gcx, y = g.positions[v * 3 + 1] - gcy, z = g.positions[v * 3 + 2];
-    theta[v] = (Math.atan2(y, x) + Math.PI * 2) % (Math.PI * 2);
+    theta[v] = (Math.atan2(y, x) + turn + Math.PI * 4) % (Math.PI * 2);
     u[v] = Math.min(1, Math.max(0, (z - gz0) / gh));
     rad[v] = Math.hypot(x, y);
     const bin = Math.floor(theta[v] / (Math.PI * 2) * N) % N, band = Math.min(bands - 1, Math.floor(u[v] * bands));
