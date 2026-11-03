@@ -170,7 +170,13 @@ to band (horizontal stripes) or crumple where a band had few vertices
 (the polo's chest). Coarse parts of a model (sleeves, collars) are
 refined before mapping so their long triangles do not kink. Whether a
 model is a shell or a solid is read from its sections too: a shell has
-rings through most of its height. A *neck
+rings through most of its height. A pen pot's closed bottom is cut off
+where its cavity starts (the first section with a hole), not where the
+section falls below a share of its hull, which on the thick-walled hoodie
+cut 9 mm into the sleeves and left them ragged; and the inner reference
+is floored at half the band's median outer radius rather than a share of
+the bin's own, so a sleeve or pocket standing out from the body no longer
+steps the wall along its outline (Jerred, 2026-11-03 04:05). A *neck
 spread* opens the collar out from the neck and chest by a set amount,
 blended in over the top of the garment, for shirts and wraps alike.
 

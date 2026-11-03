@@ -860,11 +860,13 @@ export function wrapFrame(garment: ManifoldT, cav: Cavity, opts: Partial<WrapOpt
 export function floorHeight(garment: ManifoldT): number {
   const bb = garment.boundingBox();
   const h = bb.max[2] - bb.min[2];
+  // the floor ends where the cavity starts: the section is no longer one filled disc (a hole appears, or it is well short of
+  // its hull); thick-walled models (a hoodie with hands in its pocket) still fill 60% of their hull above the floor
   let last = 0;
   for (let z = bb.min[2] + 0.4; z < bb.min[2] + 0.4 * h; z += 0.5) {
     const cs = garment.slice(z);
     const area = cs.area(), hull = cs.hull().area();
-    if (!hull || area / hull < 0.6) return last;
+    if (!hull || cs.toPolygons().length > 1 || area / hull < 0.9) return last;
     last = z - bb.min[2];
   }
   return last;
@@ -910,8 +912,15 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     u[v] = Math.min(1, Math.max(0, (z - gz0) / gh));
     rad[v] = Math.hypot(x, y);
   }
-  // the inner reference is the wall, not a floor remnant or a stray bit near the axis: never less than 60% of the outer radius
-  for (let i = 0; i < N * bands; i++) if (rmin[i] !== Infinity) rmin[i] = Math.max(rmin[i], 0.6 * rmax[i]);
+  // the inner reference is the wall, not a stray bit near the axis (a drawstring end, a floor remnant): never less than half
+  // the band's typical outer radius. The band's median, not the bin's own outer radius, so a sleeve or pocket standing out
+  // from the body does not pull the wall's reference out with it and step the surface along its outline
+  for (let b = 0; b < bands; b++) {
+    const row = Array.from(rmax.subarray(b * N, (b + 1) * N)).filter((v) => v > 0).sort((p, q) => p - q);
+    if (!row.length) continue;
+    const floor = 0.5 * row[row.length >> 1];
+    for (let i = b * N; i < (b + 1) * N; i++) if (rmin[i] !== Infinity) rmin[i] = Math.max(rmin[i], floor);
+  }
   // fill empty bins from neighbours so every vertex has a reference
   for (let pass = 0; pass < N; pass++) {
     let changed = false;
@@ -1000,7 +1009,7 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   const carved = shearManifold(hollow, shear, 1);
   const bodies = carved.decompose().filter((b) => b.volume() > 1);
   let result = bodies.length > 1 ? Manifold.union(bodies) : bodies[0] ?? carved;
-  if (bodies.length !== 1) warnings.push(`${bodies.length} separate pieces after hollowing`);
+  if (bodies.length !== 1) warnings.push(`${bodies.length} separate pieces after hollowing (${bodies.map((b) => b.volume().toFixed(0)).join(', ')} mm³)`);
   if (result.volume() < 0.3 * solid.volume()) warnings.push('most of the garment was inside the goose; raise the thickness or use solid mode');
   let parts: ManifoldT[] | undefined;
   if (o.formFit && (o.split ?? 'none') === 'none') warnings.push('a form-fitting garment cannot slide on; split it to wear it');
