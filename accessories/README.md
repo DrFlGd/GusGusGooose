@@ -27,6 +27,7 @@ goose itself, or wrap a downloaded garment over the body:
 ```sh
 node src/cli.ts shirt --hem 46 --neck 108 --thickness 1.6 --out accessories/out/shirt.stl
 node src/cli.ts wrap --garment accessories/sweater/source.stl --hem 46 --neck 108
+node src/cli.ts shirt --split sides --form-fit --out accessories/out/shirt.stl   # two halves with magnet pockets
 ```
 
 Sizes on the goose: head about 25 mm wide at the top, wings about 40 mm

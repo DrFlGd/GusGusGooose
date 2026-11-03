@@ -137,6 +137,9 @@
           <label>Turn the front <output id="cloth-front-out">0</output>° (0 points at the head)
             <input type="range" id="cloth-front" min="-90" max="90" step="5" value="0" />
           </label>
+          <label>Lean toward the neck <output id="cloth-lean-out">1</output> (0 = straight up from the body's centre, 1 = collar centred on the neck)
+            <input type="range" id="cloth-lean" min="0" max="1" step="0.1" value="1" />
+          </label>
         </details>
         <details>
           <summary>Fabric and details</summary>
@@ -155,7 +158,27 @@
           <label>Smoothing <input type="number" id="cloth-smooth" step="1" min="0" max="6" value="2" /></label>
         </details>
         <details>
+          <summary>Split in two with magnets</summary>
+          <label>Split
+            <select id="cloth-split">
+              <option value="none">No, one piece that slides on</option>
+              <option value="sides">Left and right halves (seams at the front and back)</option>
+              <option value="front-back">Front and back halves (seams at the sides)</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="cloth-form-fit" /> Form fit: hug the chest and under the tail (the halves clip on, so undercuts are fine)</label>
+          <label>Magnets per seam <input type="number" id="cloth-split-magnets" step="1" min="0" value="3" />, discs <input type="number" id="cloth-split-magnet-dia" step="0.5" value="3" /> × <input type="number" id="cloth-split-magnet-thick" step="0.5" value="1" /> mm</label>
+          <p class="muted small">Pockets face each other across the seam, with 0.3 mm of play on the diameter. Where the wall is too thin for the magnet, a small round pad is added on the outside. Export gives one STL per half.</p>
+        </details>
+        <details id="wrap-details">
           <summary>Wrapping a loaded model</summary>
+          <p class="muted small">The loaded model is shown where the wrap will put it (scaled and leaned, before bending to the body). Line it up, then wrap.</p>
+          <label>Turn the model <output id="wrap-turn-out">0</output>°
+            <input type="range" id="wrap-turn" min="-180" max="180" step="5" value="0" />
+          </label>
+          <label>Shift its axis x <input type="number" id="wrap-dx" step="0.5" value="0" /> y <input type="number" id="wrap-dy" step="0.5" value="0" /> mm (in the model's own frame)</label>
+          <label>Use the model from <input type="number" id="wrap-band-lo" step="1" min="0" value="0" /> to <input type="number" id="wrap-band-hi" step="1" min="0" value="" placeholder="top" /> mm above its bottom; the rest is cut away</label>
+          <label>Crop its sides: left <input type="number" id="wrap-crop-l" step="1" min="0" value="0" /> right <input type="number" id="wrap-crop-r" step="1" min="0" value="0" /> front <input type="number" id="wrap-crop-f" step="1" min="0" value="0" /> back <input type="number" id="wrap-crop-b" step="1" min="0" value="0" /> mm</label>
           <label>Keep the top <input type="number" id="cloth-keep-top" step="1" min="0" value="30" /> mm of the model in proportion (collar, hood); the rest stretches to the hem</label>
           <p class="muted small">A closed bottom (pen pots) is cut off automatically. Pen-pot shirts, hoodies and jackets work well; sleeves come along as bumps.</p>
         </details>

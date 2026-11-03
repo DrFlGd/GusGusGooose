@@ -145,6 +145,29 @@ placket, a ribbed hem band, and painted stripes. Each is a small bump on
 the garment's radial profile or a cut, so they are cheap and never break
 the drop-on shape.
 
+**A leaning axis.** The goose's neck sits well forward of the body's
+centre, so a garment built around a vertical axis through the body has its
+collar behind the neck. The garment is now built in a sheared frame in
+which the line from the body's centre at the hem to the neck's centre at
+the collar is vertical, and sheared back afterwards: the collar is centred
+on the neck and the garment slides on along that lean (the `axisToNeck`
+option, 0 to 1). Horizontal sections are unchanged by the shear, so the
+profile, clearance and collar all work as before.
+
+**Lining up a wrap.** The loaded model is shown as a ghost where the wrap
+will put it (turned to face the front, scaled to the body's mean radius,
+leaned), and can be turned about its axis, shifted, limited to a band of
+its height and cropped on each side before wrapping; the rest is cut away.
+
+**Split halves (Jerred, 2026-11-03).** Any garment can be cut in two along
+a plane through the leaned axis, left/right or front/back, with disc-magnet
+pockets (3 x 1 mm by default, 0.3 mm of play) facing each other across each
+seam. Where the wall is thinner than the magnet needs, a small round pad is
+added on the outside of the seam first. Because the halves clip on, the
+drop-on constraint can be dropped: the *form fit* option follows the body
+as it is, into the chest and under the tail, with only the clearance
+around it.
+
 ## Still needed from Jerred
 
 - [ ] The goose base STL with the magnet voids in it, the exact file sliced from. It gets bundled into the app at `goose/goose.stl`.

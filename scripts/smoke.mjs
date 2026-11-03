@@ -118,6 +118,23 @@ console.log('7b.', await status(), '|', await page.locator('#cloth-result').text
 await page.screenshot({ path: join(out, '7b-wrapped.png') });
 const [clothDl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-cloth')]);
 console.log('7c. exported', clothDl.suggestedFilename());
+// a split, form-fitting shirt: two halves with magnet pockets, exported as two files (the controls sit in a closed details)
+await page.evaluate(() => { for (const d of document.querySelectorAll('#tab-clothing details')) d.open = true; });
+await page.selectOption('#cloth-split', 'sides');
+await page.check('#cloth-form-fit');
+await page.click('#make-shirt');
+await page.waitForFunction(() => document.getElementById('cloth-result').textContent.includes('split into 2 halves'), null, { timeout: 120000 });
+console.log('7d.', await page.locator('#cloth-result').textContent());
+await page.screenshot({ path: join(out, '7d-split-shirt.png') });
+const halves = [];
+page.on('download', (d) => halves.push(d.suggestedFilename()));
+await page.click('#export-cloth');
+await page.waitForFunction(() => true, null, { timeout: 2000 }).catch(() => {});
+await new Promise((r) => setTimeout(r, 1500));
+console.log('7e. exported halves', halves.join(', '));
+if (halves.length !== 2) throw new Error(`expected two half files, got ${halves.length}`);
+await page.selectOption('#cloth-split', 'none');
+await page.uncheck('#cloth-form-fit');
 
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');

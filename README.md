@@ -19,7 +19,12 @@ body between a hem and a neck height and slips on over the head (no
 magnets), with a V, scoop or crew neckline, a collar, ribbed or quilted
 fabric, buttons, a placket, a hem band and stripes; or it wraps a
 downloaded garment (pen-pot shirts and jackets work well) over the body,
-keeping its collar in proportion, and hollows it. The
+keeping its collar in proportion, and hollows it. The garment's axis leans
+so the collar is centred on the neck. For a wrap, the loaded model is shown
+where it will land and can be turned, shifted, cropped (a height band and
+the four sides) and lined up before wrapping. Either kind can be split into
+two halves with small disc-magnet pockets along the seams, and a form-fit
+option lets the halves hug the chest and the tail. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
 pause height reported, and exports the holed goose. The Paint tab (after
 a fit or a garment) brushes faces with a palette of your filament colours,
@@ -79,6 +84,10 @@ node src/cli.ts hole --model goose/goose.holed.stl --at 140,78,170 --name beak -
 node src/cli.ts shirt --hem 46 --neck 108 --thickness 1.6 --clearance 0.4 --out shirt.stl
 # or stretch a downloaded garment (hem at its bottom) over the body and hollow it
 node src/cli.ts wrap --garment sweater.stl --hem 46 --neck 108 --out sweater.fitted.stl
+# line it up first: turn it, shift its axis, keep a height band, crop its sides (left,right,front,back)
+node src/cli.ts wrap --garment jacket.3mf --turn 10 --shift 0,-2 --band 5,60 --crop 0,0,0,8 --keep-top 25
+# two halves that clip on with 3 x 1 mm magnets, hugging the chest and tail (writes .a.stl and .b.stl as well)
+node src/cli.ts shirt --split sides --form-fit --split-magnets 3 --split-magnet-dia 3 --split-magnet-thick 1 --out shirt.stl
 
 # magnet size and pocket are adjustable per accessory (defaults mirror the goose void)
 npm run fit -- --accessory hat.stl --point head --magnet-dia 8 --magnet-thick 3 --pocket-radial 0.1 --pocket-axial 0.2

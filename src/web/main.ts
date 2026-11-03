@@ -8,7 +8,7 @@ import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
 import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
 import { loadModel } from '../load-model.ts';
 import { DEFAULT_PREPARE, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
-import { contourGarment, wrapGarment, type GarmentOptions, type WrapOptions } from '../clothing.ts';
+import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, type Cavity, type GarmentOptions, type WrapOptions } from '../clothing.ts';
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
@@ -405,7 +405,8 @@ function clearFitted() {
   $<HTMLButtonElement>('export-cloth').disabled = true;
   $<HTMLButtonElement>('paint-tab-button').disabled = true;
   $('fit-result').textContent = '';
-  if (accessoryObject) accessoryObject.visible = true;
+  if (accessoryObject) accessoryObject.visible = tab !== 'clothing';
+  if (ghost) ghost.visible = tab === 'clothing';
 }
 
 /** Shows `mesh` as the fitted part, with per-face paint colours. */
@@ -430,6 +431,7 @@ function showFitted(mesh: IndexedMesh) {
   fittedObject = new THREE.Mesh(paint.geometry, fittedMaterial);
   scene.add(fittedObject);
   if (accessoryObject) accessoryObject.visible = false;
+  hideGhost();
   $<HTMLButtonElement>('paint-tab-button').disabled = false;
   $('paint-info').textContent = `${(mesh.triangles.length / 3).toLocaleString()} faces.`;
 }
@@ -535,7 +537,7 @@ function setTab(name: string) {
   for (const x of document.querySelectorAll<HTMLButtonElement>('.tabs button')) x.classList.toggle('active', x.dataset.tab === name);
   for (const t of ['accessory', 'clothing', 'hole', 'paint']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
   guides.visible = name === 'clothing';
-  if (name === 'clothing') updateGuides();
+  if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   // in paint mode the left button paints and the right button orbits
   controls.mouseButtons = name === 'paint'
     ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
@@ -573,9 +575,50 @@ function garmentOptions(): Partial<WrapOptions> {
     collarHeight: num('cloth-collar-height'), frontOffset: num('cloth-front'),
     fabric: $<HTMLSelectElement>('cloth-fabric').value as GarmentOptions['fabric'], fabricDepth: num('cloth-fabric-depth'), fabricPitch: num('cloth-fabric-pitch'),
     buttons: num('cloth-buttons'), buttonDiameter: num('cloth-button-dia'), placket: $<HTMLInputElement>('cloth-placket').checked,
-    hemBand: num('cloth-hem-band'), stripes: num('cloth-stripes'),
-    keepTop: num('cloth-keep-top'),
+    hemBand: num('cloth-hem-band'), stripes: num('cloth-stripes'), axisToNeck: num('cloth-lean'),
+    split: $<HTMLSelectElement>('cloth-split').value as GarmentOptions['split'], formFit: $<HTMLInputElement>('cloth-form-fit').checked,
+    splitMagnets: num('cloth-split-magnets'), splitMagnetDiameter: num('cloth-split-magnet-dia'), splitMagnetThickness: num('cloth-split-magnet-thick'),
+    keepTop: num('cloth-keep-top'), garmentTurn: num('wrap-turn'), garmentShift: [num('wrap-dx'), num('wrap-dy')],
+    garmentBand: [num('wrap-band-lo'), $<HTMLInputElement>('wrap-band-hi').value === '' ? Infinity : num('wrap-band-hi')],
+    garmentCrop: [num('wrap-crop-l'), num('wrap-crop-r'), num('wrap-crop-f'), num('wrap-crop-b')],
   };
+}
+$<HTMLInputElement>('cloth-lean').oninput = () => { $('cloth-lean-out').textContent = $<HTMLInputElement>('cloth-lean').value; };
+$<HTMLInputElement>('wrap-turn').oninput = () => { $('wrap-turn-out').textContent = $<HTMLInputElement>('wrap-turn').value; };
+
+// ghost preview of the loaded model, cropped, where the wrap will put it; the body profile is cached per hem/neck/lean
+let cavityKey = '', cavity: Cavity | null = null;
+let cropKey = '', ghost: THREE.Mesh | null = null;
+let previewTimer = 0;
+function hideGhost() { if (ghost) ghost.visible = false; }
+function wrapPreview() {
+  if (tab !== 'clothing' || !accessoryManifold || !gooseManifold) { hideGhost(); return; }
+  const o = garmentOptions();
+  if (o.neck! <= o.hem!) return;
+  const key = [o.hem, o.neck, o.axisToNeck, o.clearance, o.collar, o.smooth, o.frontOffset].join('/');
+  if (key !== cavityKey) {
+    cavityKey = key;
+    cavity = null;
+    clearTimeout(previewTimer);
+    previewTimer = window.setTimeout(() => { cavity = cavityProfile(gooseManifold, o); wrapPreview(); }, 50);
+    return;
+  }
+  if (!cavity) return;
+  const ck = [rawName, o.garmentBand, o.garmentCrop].join('/');
+  if (ck !== cropKey || !ghost) {
+    cropKey = ck;
+    if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); }
+    ghost = new THREE.Mesh(toGeometry(fromManifold(trimGarment(accessoryManifold, o).garment)), accessoryMaterial);
+    ghost.matrixAutoUpdate = false;
+    scene.add(ghost);
+  }
+  const f = wrapFrame(accessoryManifold, cavity, o);
+  ghost.matrix.fromArray(f.matrix);
+  ghost.visible = !fittedObject;
+  if (accessoryObject) accessoryObject.visible = false;
+}
+for (const id of ['wrap-turn', 'wrap-dx', 'wrap-dy', 'wrap-band-lo', 'wrap-band-hi', 'wrap-crop-l', 'wrap-crop-r', 'wrap-crop-f', 'wrap-crop-b', 'cloth-keep-top', 'cloth-lean', 'cloth-front', 'cloth-hem', 'cloth-neck']) {
+  $<HTMLInputElement>(id).addEventListener('input', wrapPreview);
 }
 $<HTMLInputElement>('cloth-neckline-width').oninput = () => { $('cloth-neckline-width-out').textContent = $<HTMLInputElement>('cloth-neckline-width').value; };
 $<HTMLInputElement>('cloth-front').oninput = () => { $('cloth-front-out').textContent = $<HTMLInputElement>('cloth-front').value; };
@@ -604,6 +647,7 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
     clearFitted();
     showFitted(g.mesh);
     if (g.faceMaterial && paint) { paint.faceMaterial.set(g.faceMaterial); paint.recolor(); }
+    garmentParts = g.parts && g.parts.length > 1 ? g.parts.map((p) => fromManifold(p)) : null;
     garmentName = kind === 'shirt' ? `shirt.${o.hem}-${o.neck}` : `${rawName.replace(/\.[^.]+$/, '')}.wrapped`;
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('cloth-result').textContent = `Done in ${secs} s: ${g.solid.volume().toFixed(0)} mm³, ${(g.mesh.triangles.length / 3).toLocaleString()} faces. ${g.warnings.join('; ')}`;
@@ -617,9 +661,14 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
   }
 }
 let garmentName = 'shirt';
+let garmentParts: IndexedMesh[] | null = null;
 $('make-shirt').onclick = () => { makeGarment('shirt'); };
 $('wrap-garment').onclick = () => { makeGarment('wrap'); };
-$('export-cloth').onclick = () => { if (paint) download(`${garmentName}.stl`, serializeStl(paint.mesh)); };
+$('export-cloth').onclick = () => {
+  if (!paint) return;
+  if (garmentParts) garmentParts.forEach((p, i) => download(`${garmentName}.${'ab'[i] ?? i}.stl`, serializeStl(p)));
+  else download(`${garmentName}.stl`, serializeStl(paint.mesh));
+};
 
 // ---------- magnet hole tool ----------
 $<HTMLSelectElement>('hole-mode').onchange = (e) => {

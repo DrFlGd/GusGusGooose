@@ -85,12 +85,31 @@ export interface GarmentOptions {
   hemBand?: number;
   /** paint horizontal stripes this many mm tall (0 = none); result.faceMaterial alternates 0 and 1 */
   stripes?: number;
+  /**
+   * lean the drop-on axis so the collar is centred on the neck: 0 keeps it
+   * vertical through the body's centre, 1 passes it through the neck's centre
+   * at the collar (the garment then goes on along that lean)
+   */
+  axisToNeck?: number;
+  /**
+   * follow the body closely, undercuts included (the chest, under the tail),
+   * instead of the drop-on shape; only wearable as split halves
+   */
+  formFit?: boolean;
+  /** cut the garment in two: 'sides' (left and right halves, seams at the front and back) or 'front-back' (seams at the sides) */
+  split?: 'none' | 'sides' | 'front-back';
+  /** magnet pockets per seam */
+  splitMagnets?: number;
+  /** disc magnets in the seams: diameter and thickness, mm (the pocket has 0.3 and 0.2 mm of play) */
+  splitMagnetDiameter?: number;
+  splitMagnetThickness?: number;
 }
 
 export const DEFAULT_GARMENT: GarmentOptions = {
   hem: 46, neck: 108, thickness: 1.6, clearance: 0.4, collar: 'tilt', collarGap: 1, dz: 0.75, nTheta: 144, smooth: 2,
   neckline: 'v', necklineDepth: 14, necklineWidth: 45, collarHeight: 0,
-  fabric: 'plain', fabricDepth: 0.4, fabricPitch: 48, buttons: 0, buttonDiameter: 3, placket: false, hemBand: 0, stripes: 0,
+  fabric: 'plain', fabricDepth: 0.4, fabricPitch: 48, buttons: 0, buttonDiameter: 3, placket: false, hemBand: 0, stripes: 0, axisToNeck: 1,
+  formFit: false, split: 'none', splitMagnets: 3, splitMagnetDiameter: 3, splitMagnetThickness: 1,
 };
 
 /** Samples the goose as a radial profile from `zMin` to the top of the model. */
@@ -280,6 +299,8 @@ export interface GarmentResult {
   centre: [number, number];
   /** the inner (drop-on) profile, for the preview and for wrapping */
   inner: BodyProfile;
+  /** the halves when the garment is split, with their magnet pockets; `solid` and `mesh` are both halves together */
+  parts?: ManifoldT[];
   warnings: string[];
 }
 
@@ -306,18 +327,81 @@ export interface Cavity {
   raw: BodyProfile;
   /** heights the collar polygons are built from */
   neckSpan: [number, number];
+  /** the frame everything here is measured in: undo it (sign -1 applied, so +1 restores) to get back to the goose's frame */
+  shear: Shear;
 }
 
-/** The space a garment between hem and neck must leave for the goose, and the collar opening. */
+/** A horizontal shear: x += sx (z - z0), y += sy (z - z0). Garments are built in the sheared frame, where the lean of the body toward the neck is straightened out. */
+export interface Shear { sx: number; sy: number; z0: number; /** the body's centre at the hem, which the leaned axis passes through */ axis?: [number, number] }
+
+function sliceCentroid(goose: ManifoldT, zs: number[]): [number, number, number] {
+  let sx = 0, sy = 0, sa = 0;
+  for (const z of zs) {
+    for (const poly of goose.slice(z).toPolygons() as [number, number][][]) {
+      const { area, x, y } = polygonCentroid(poly);
+      sx += x * area; sy += y * area; sa += area;
+    }
+  }
+  return sa ? [sx / sa, sy / sa, sa] : [0, 0, 0];
+}
+
+/** The shear that puts the neck's centre at the collar straight above the body's centre at the hem (scaled by `axisToNeck`). */
+export function neckShear(goose: ManifoldT, o: GarmentOptions): Shear {
+  const lean = o.axisToNeck ?? 1;
+  if (!lean) return { sx: 0, sy: 0, z0: o.hem };
+  const zs = (a: number, b: number, n: number) => Array.from({ length: n }, (_, i) => a + ((b - a) * (i + 0.5)) / n);
+  const [hx, hy, ha] = sliceCentroid(goose, zs(o.hem, o.hem + 8, 4));
+  // the neck: the biggest section at the first height above the collar where the body has fallen away
+  // (well under the shoulders' area), so the shoulders themselves are not mistaken for it
+  const biggest = (z: number) => {
+    let best = { area: 0, x: 0, y: 0 }, count = 0;
+    for (const poly of goose.slice(z).toPolygons() as [number, number][][]) { const c = polygonCentroid(poly); if (c.area > 1) count++; if (c.area > best.area) best = c; }
+    return { ...best, count };
+  };
+  const shoulder = biggest(o.neck - 2).area;
+  const top = goose.boundingBox().max[2];
+  let neck = biggest(o.neck + 2);
+  for (let z = o.neck + 2; z < top - 0.1; z += 2) {
+    const b = biggest(z);
+    if (!b.area) break;
+    neck = b;
+    // one section left (the last of the shoulders has gone), much smaller than the shoulders: the neck
+    if (b.count === 1 && b.area < 0.3 * shoulder) break;
+  }
+  const [nx, ny, na] = [neck.x, neck.y, neck.area];
+  if (!ha || !na || o.neck - o.hem < 1) return { sx: 0, sy: 0, z0: o.hem };
+  return { sx: (lean * (nx - hx)) / (o.neck - o.hem), sy: (lean * (ny - hy)) / (o.neck - o.hem), z0: o.hem, axis: [hx, hy] };
+}
+
+/** Applies the shear (sign +1) or undoes it (sign -1). */
+export function shearManifold(m: ManifoldT, s: Shear, sign: 1 | -1): ManifoldT {
+  if (!s.sx && !s.sy) return m;
+  return m.warp((v) => { v[0] += sign * s.sx * (v[2] - s.z0); v[1] += sign * s.sy * (v[2] - s.z0); });
+}
+
+/** The space a garment between hem and neck must leave for the goose, and the collar opening. Measured in the sheared frame (see `shear`). */
 export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = {}): Cavity {
   const o = { ...DEFAULT_GARMENT, ...opts };
   const dz = o.dz ?? 1, nTheta = o.nTheta ?? 144;
-  const p = bodyProfile(goose, o.hem, dz, nTheta, o.centre, [o.hem, o.neck]);
+  const shear = neckShear(goose, o);
+  goose = shearManifold(goose, shear, -1);
+  // with a lean, the axis is the line through the body's centre at the hem and the neck's centre, which the shear has made vertical
+  const p = bodyProfile(goose, o.hem, dz, nTheta, o.centre ?? ((shear.sx || shear.sy) ? shear.axis : undefined), [o.hem, o.neck]);
   const full = sweepDown(p); // everything above each height, head included
   const kNeck = p.z.findIndex((z) => z >= o.neck - 1e-6);
   const headProjection = full.r[Math.min(kNeck < 0 ? p.z.length - 1 : kNeck, p.z.length - 1)];
-  let swept = o.collar === 'drop' ? clipProfile(full, o.hem, o.neck) : sweepDown(clipProfile(p, o.hem, o.neck));
-  if (o.smooth) swept = maxProfile(sweepDown(smoothProfile(swept, o.smooth)), swept);
+  let swept: BodyProfile;
+  if (o.formFit) {
+    // the body as it is, undercuts included; where it is absent at a height, carry the ring below up so nothing pinches to the axis
+    swept = clipProfile(p, o.hem, o.neck);
+    const r = swept.r.map((row) => Float32Array.from(row));
+    for (let k = 1; k < r.length; k++) for (let i = 0; i < nTheta; i++) if (r[k][i] <= 0) r[k][i] = r[k - 1][i];
+    swept = { ...swept, r };
+    if (o.smooth) swept = maxProfile(smoothProfile(swept, o.smooth), swept);
+  } else {
+    swept = o.collar === 'drop' ? clipProfile(full, o.hem, o.neck) : sweepDown(clipProfile(p, o.hem, o.neck));
+    if (o.smooth) swept = maxProfile(sweepDown(smoothProfile(swept, o.smooth)), swept);
+  }
   const inner = offsetProfile(swept, o.clearance);
   // the collar: at least the neck plus its gap, at most the cavity top, and up to the head projection
   const neckSlice = sweepDown(clipProfile(p, o.neck, o.neck + 6)).r[0] ?? p.r[p.r.length - 1];
@@ -332,7 +416,7 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
   const neckSpan: [number, number] = o.collar === 'drop' ? [o.neck, goose.boundingBox().max[2]] : [o.neck, o.neck + 6];
   // the front is the body's centre line toward the head (the goose sits a little yawed in its project), not plain -y
   const front = (o.front !== undefined ? (o.front * Math.PI) / 180 : p.bodyDir ?? p.headDir ?? -Math.PI / 2) + ((o.frontOffset ?? 0) * Math.PI) / 180;
-  return { swept, inner, hole, headProjection, centre: [p.cx, p.cy], front, neckRing, raw, neckSpan };
+  return { swept, inner, hole, headProjection, centre: [p.cx, p.cy], front, neckRing, raw, neckSpan, shear };
 }
 
 /** Smallest signed angle difference, radians. */
@@ -377,12 +461,87 @@ async function orient(m: IndexedMesh): Promise<ManifoldT> {
   return toManifold({ positions: m.positions, triangles: tri });
 }
 
+/**
+ * Cuts a finished garment (goose frame) in two along a plane through the
+ * leaned axis, with disc-magnet pockets facing each other across each seam.
+ * Where the wall is thinner than the magnet needs, a round pad is added on
+ * the outside of the seam first.
+ */
+export async function splitGarment(solid: ManifoldT, cav: Pick<Cavity, 'centre' | 'front' | 'shear'>, o: GarmentOptions, warnings: string[]): Promise<{ solid: ManifoldT; parts: ManifoldT[] }> {
+  const { Manifold, CrossSection } = await manifold();
+  const axis = [cav.shear.sx, cav.shear.sy, 1];
+  const along = o.split === 'sides' ? [Math.cos(cav.front), Math.sin(cav.front), 0] : [-Math.sin(cav.front), Math.cos(cav.front), 0];
+  // plane normal = along x axis, normalised
+  let n = [along[1] * axis[2] - along[2] * axis[1], along[2] * axis[0] - along[0] * axis[2], along[0] * axis[1] - along[1] * axis[0]];
+  const nl = Math.hypot(n[0], n[1], n[2]);
+  n = n.map((v) => v / nl);
+  const p0 = [cav.centre[0], cav.centre[1], cav.shear.z0];
+  const d = n[0] * p0[0] + n[1] * p0[1] + n[2] * p0[2];
+  const D = o.splitMagnetDiameter ?? 3, T = o.splitMagnetThickness ?? 1, M = Math.max(0, Math.round(o.splitMagnets ?? 3));
+  const need = D + 1.2; // wall needed to hold a pocket with 0.6 mm either side
+  type Site = { x: number; y: number; z: number; out: [number, number]; thick: number; side: number };
+  const t = [-n[1], n[0]]; // horizontal direction in the plane
+  // every wall crossing of the plane, at heights 1.5 mm apart: a seam is one side's run of crossings
+  const crossings: Site[] = [];
+  for (let z = o.hem + 1; z <= o.neck - 1; z += 1.5) {
+    const px = p0[0] + cav.shear.sx * (z - cav.shear.z0), py = p0[1] + cav.shear.sy * (z - cav.shear.z0);
+    const strip = CrossSection.square([400, 0.4], true).rotate((Math.atan2(t[1], t[0]) * 180) / Math.PI).translate([px, py]);
+    for (const poly of solid.slice(z).intersect(strip).toPolygons() as [number, number][][]) {
+      const c = polygonCentroid(poly);
+      if (c.area < 0.05) continue;
+      let lo = Infinity, hi = -Infinity;
+      for (const [x, y] of poly) { const s = (x - px) * t[0] + (y - py) * t[1]; lo = Math.min(lo, s); hi = Math.max(hi, s); }
+      const side = (c.x - px) * t[0] + (c.y - py) * t[1] >= 0 ? 1 : -1;
+      crossings.push({ x: c.x, y: c.y, z, out: [t[0] * side, t[1] * side], thick: hi - lo, side });
+    }
+  }
+  // M pockets spread evenly over each seam's height, with D clear of its ends
+  const sites: Site[] = [];
+  for (const side of [1, -1]) {
+    const seam = crossings.filter((c) => c.side === side).sort((a, b) => a.z - b.z);
+    if (!seam.length) continue;
+    const zLo = seam[0].z + D, zHi = seam[seam.length - 1].z - D;
+    for (let j = 0; j < M; j++) {
+      const want = M === 1 ? (zLo + zHi) / 2 : zLo + ((zHi - zLo) * j) / (M - 1);
+      let best = seam[0];
+      for (const c of seam) if (Math.abs(c.z - want) < Math.abs(best.z - want)) best = c;
+      if (!sites.some((s) => s.side === side && Math.abs(s.z - best.z) < D)) sites.push(best);
+    }
+  }
+  if (!sites.length) { warnings.push('no wall crossed the cut plane; the garment was not split'); return { solid, parts: [solid] }; }
+  const pads: ManifoldT[] = [], pockets: ManifoldT[] = [];
+  let padded = 0;
+  const alongN = (m: ManifoldT) => {
+    // a cylinder built along +z, turned onto the plane normal
+    const yaw = (Math.atan2(n[1], n[0]) * 180) / Math.PI, pitch = (Math.acos(Math.max(-1, Math.min(1, n[2]))) * 180) / Math.PI;
+    return m.rotate([0, pitch, 0]).rotate([0, 0, yaw]);
+  };
+  for (const s of sites) {
+    let [x, y] = [s.x, s.y];
+    if (s.thick < need) {
+      // a pad on the outside: its inner face flush with the wall's inner face
+      const padD = need + 0.4;
+      x = s.x - s.out[0] * (s.thick / 2) + s.out[0] * (padD / 2);
+      y = s.y - s.out[1] * (s.thick / 2) + s.out[1] * (padD / 2);
+      pads.push(alongN(Manifold.cylinder(2 * (T + 0.2) + 1.6, padD / 2, padD / 2, 32, true)).translate(x, y, s.z));
+      padded++;
+    }
+    pockets.push(alongN(Manifold.cylinder(2 * (T + 0.2), (D + 0.3) / 2, (D + 0.3) / 2, 32, true)).translate(x, y, s.z));
+  }
+  if (pads.length) solid = solid.add(Manifold.union(pads));
+  solid = solid.subtract(Manifold.union(pockets));
+  const parts = [solid.trimByPlane(n as [number, number, number], d), solid.trimByPlane(n.map((v) => -v) as [number, number, number], -d)].filter((m) => m.volume() > 1);
+  warnings.push(`split into ${parts.length} halves with ${sites.length} magnet pockets for ${D} x ${T} mm discs${padded ? ` (${padded} on pads where the wall is under ${need.toFixed(1)} mm)` : ''}`);
+  return { solid, parts };
+}
+
 /** A shirt, sweater or coat: a shell that follows the goose between hem and neck. */
 export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOptions> = {}): Promise<GarmentResult> {
   const o = { ...DEFAULT_GARMENT, ...opts };
   if (o.neck - o.hem < 3 * (o.dz ?? 1) + o.thickness) throw new Error('neck must be above the hem');
   const { Manifold } = await manifold();
   const cav = cavityProfile(goose, o);
+  goose = shearManifold(goose, cav.shear, -1);
   const N = cav.inner.nTheta, t = o.thickness;
   const outer = offsetProfile(cav.swept, o.clearance + t);
   const K = cav.inner.z.length;
@@ -444,7 +603,8 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
     };
     solid = solid.subtract(await orient(heightCutter(cav.centre[0], cav.centre[1], zCut, N, 0.01, 300, topZ + 60)));
   }
-  // buttons down the front
+  // back to the goose's frame; buttons stay round, so they go on after
+  solid = shearManifold(solid, cav.shear, 1);
   const nb = Math.max(0, Math.round(o.buttons ?? 0));
   if (nb > 0) {
     const bd = o.buttonDiameter ?? 3;
@@ -456,7 +616,9 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
       const k = Math.min(K - 1, Math.max(0, Math.round((z - o.hem) / (out.z[1] - out.z[0]))));
       const i = Math.round((cav.front / (Math.PI * 2)) * N + N) % N;
       const r = out.r[k][i] + bd * 0.15;
-      buttons.push(Manifold.sphere(bd / 2, 32).translate(cav.centre[0] + r * Math.cos(cav.front), cav.centre[1] + r * Math.sin(cav.front), z));
+      const x = cav.centre[0] + r * Math.cos(cav.front) + cav.shear.sx * (z - cav.shear.z0);
+      const y = cav.centre[1] + r * Math.sin(cav.front) + cav.shear.sy * (z - cav.shear.z0);
+      buttons.push(Manifold.sphere(bd / 2, 32).translate(x, y, z));
     }
     if (buttons.length) solid = solid.add(Manifold.union(buttons));
   }
@@ -468,6 +630,9 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
     if (dropped > 1) warnings.push(`dropped ${bodies.length - 1} loose piece(s), ${dropped.toFixed(1)} mm³`);
     solid = bodies[0];
   }
+  let parts: ManifoldT[] | undefined;
+  if (o.formFit && (o.split ?? 'none') === 'none') warnings.push('a form-fitting garment cannot slide on; split it to wear it');
+  if (o.split && o.split !== 'none') ({ solid, parts } = await splitGarment(solid, cav, o, warnings));
   const result = fromManifold(solid);
   // stripes: paint by height band
   let faceMaterial: Uint8Array | undefined;
@@ -485,7 +650,7 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
   const holeW = 2 * Math.max(...cav.hole), headW = 2 * Math.max(...cav.headProjection);
   const tight = cav.hole.some((h, i) => h < cav.headProjection[i] + o.clearance - 1e-6);
   const note = o.collar === 'drop' ? 'drops straight on' : tight ? 'goes on tilted, beak first through the neckline' : 'drops straight on';
-  return { mesh: result, solid, faceMaterial, centre: cav.centre, inner: cav.inner, warnings: [...warnings, `collar up to ${holeW.toFixed(0)} mm across (head and beak project ${headW.toFixed(0)} mm): ${note}`] };
+  return { mesh: result, solid, faceMaterial, centre: cav.centre, inner: cav.inner, parts, warnings: [...warnings, `collar up to ${holeW.toFixed(0)} mm across (head and beak project ${headW.toFixed(0)} mm): ${note}`] };
 }
 
 export interface WrapOptions extends GarmentOptions {
@@ -495,6 +660,74 @@ export interface WrapOptions extends GarmentOptions {
   keepTop?: number;
   /** remove a closed bottom (pen pots): 'auto' detects it, or a height in mm to cut off, 0 = keep */
   floor?: 'auto' | number;
+  /** turn the model about its own axis, degrees, on top of the automatic facing (its -y lands on the goose's front) */
+  garmentTurn?: number;
+  /** where the model's axis is, mm from the centre of its bounding box */
+  garmentShift?: [number, number];
+  /** the band of the model that lands between hem and neck, mm above its bottom (after any floor is removed); the rest is cut away */
+  garmentBand?: [number, number];
+  /** mm cut off the model's sides in its own frame: [left (-x), right (+x), front (-y), back (+y)] */
+  garmentCrop?: [number, number, number, number];
+}
+
+/** The model's mean radius about an axis, over its height: what the wrap scales to the body's mean radius. */
+export function garmentMeanRadius(garment: ManifoldT, cx: number, cy: number): number {
+  const bb = garment.boundingBox();
+  const p = bodyProfile(garment, bb.min[2] + 0.1, Math.max(0.5, (bb.max[2] - bb.min[2]) / 24), 72, [cx, cy]);
+  let sum = 0, n = 0;
+  for (const row of p.r) for (const v of row) if (v > 0) { sum += v; n++; }
+  return n ? sum / n : 0;
+}
+
+/** The model after the floor, the chosen band and the side crops are cut, and where its axis is. */
+export function trimGarment(garment: ManifoldT, o: Partial<WrapOptions>, warnings: string[] = []) {
+  const floor = o.floor === undefined || o.floor === 'auto' ? floorHeight(garment) : o.floor;
+  if (floor > 0) {
+    garment = garment.trimByPlane([0, 0, 1], garment.boundingBox().min[2] + floor + 0.2);
+    warnings.push(`removed a ${floor.toFixed(1)} mm closed bottom`);
+  }
+  const band = o.garmentBand;
+  if (band) {
+    const z0 = garment.boundingBox().min[2];
+    if (band[0] > 0) garment = garment.trimByPlane([0, 0, 1], z0 + band[0]);
+    if (Number.isFinite(band[1]) && band[1] > band[0]) garment = garment.trimByPlane([0, 0, -1], -(z0 + band[1]));
+  }
+  let bb = garment.boundingBox();
+  // the axis is set before any side crop, so cropping a side does not move the rest of the model
+  const gcx = (bb.min[0] + bb.max[0]) / 2 + (o.garmentShift?.[0] ?? 0), gcy = (bb.min[1] + bb.max[1]) / 2 + (o.garmentShift?.[1] ?? 0);
+  const crop = o.garmentCrop;
+  if (crop) {
+    if (crop[0] > 0) garment = garment.trimByPlane([1, 0, 0], bb.min[0] + crop[0]);
+    if (crop[1] > 0) garment = garment.trimByPlane([-1, 0, 0], -(bb.max[0] - crop[1]));
+    if (crop[2] > 0) garment = garment.trimByPlane([0, 1, 0], bb.min[1] + crop[2]);
+    if (crop[3] > 0) garment = garment.trimByPlane([0, -1, 0], -(bb.max[1] - crop[3]));
+    bb = garment.boundingBox();
+  }
+  return { garment, bb, gcx, gcy };
+}
+
+/** An affine preview of where the wrap puts the model: column-major 4x4 matrix in the goose's frame (the real wrap also bends it to the body). */
+export interface WrapFrame { matrix: number[]; widthScale: number; heightScale: number; turn: number; shear: Shear }
+
+export function wrapFrame(garment: ManifoldT, cav: Cavity, opts: Partial<WrapOptions> = {}): WrapFrame {
+  const o = { ...DEFAULT_GARMENT, mode: 'auto' as const, keepTop: 0, floor: 'auto' as const, ...opts };
+  const { bb, gcx, gcy } = trimGarment(garment, o, []);
+  const turn = cav.front + Math.PI / 2 + ((o.garmentTurn ?? 0) * Math.PI) / 180;
+  let meanInner = 0, cnt = 0;
+  for (const row of cav.inner.r) for (const v of row) { meanInner += v; cnt++; }
+  meanInner /= cnt || 1;
+  const meanOuter = garmentMeanRadius(garment, gcx, gcy);
+  const widthScale = meanOuter > 0 ? meanInner / meanOuter : 1;
+  const heightScale = (o.neck - o.hem) / Math.max(1e-6, bb.max[2] - bb.min[2]);
+  const c = Math.cos(turn), sn = Math.sin(turn), w = widthScale, h = heightScale, { sx, sy, z0 } = cav.shear;
+  // M = Shear · T(cx, cy, hem) · S(w, w, h) · Rz(turn) · T(-gcx, -gcy, -gz0), column-major
+  const [cx, cy] = cav.centre;
+  const a = [w * c, w * sn, 0, 0, -w * sn, w * c, 0, 0, 0, 0, h, 0, cx - w * (c * gcx - sn * gcy), cy - w * (sn * gcx + c * gcy), o.hem - h * bb.min[2], 1];
+  // shear rows: x' = x + sx (z - z0), y' = y + sy (z - z0)
+  const m = a.slice();
+  for (let col = 0; col < 4; col++) { m[col * 4] += sx * a[col * 4 + 2]; m[col * 4 + 1] += sy * a[col * 4 + 2]; }
+  m[12] -= sx * z0; m[13] -= sy * z0;
+  return { matrix: m, widthScale, heightScale, turn, shear: cav.shear };
 }
 
 /** Height of a closed floor at the bottom of a model, 0 if it is open underneath. */
@@ -519,21 +752,18 @@ export function floorHeight(garment: ManifoldT): number {
 export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Partial<WrapOptions> = {}): Promise<GarmentResult & { mode: 'shell' | 'solid' }> {
   const o = { ...DEFAULT_GARMENT, mode: 'auto' as const, keepTop: 0, floor: 'auto' as const, ...opts };
   const { Manifold } = await manifold();
-  const { inner, front } = cavityProfile(goose, o);
+  const cav = cavityProfile(goose, o);
+  const { inner, front, shear } = cav;
   const warnings: string[] = [];
   // the garment faces -y in its own frame; turn it so that lands on the goose's front
-  const turn = front + Math.PI / 2;
-  // pen pots and vases have a closed bottom: cut it off so the garment is open at the hem
-  const floor = o.floor === 'auto' ? floorHeight(garment) : o.floor;
-  if (floor > 0) {
-    garment = garment.trimByPlane([0, 0, 1], garment.boundingBox().min[2] + floor + 0.2);
-    warnings.push(`removed a ${floor.toFixed(1)} mm closed bottom`);
-  }
-  const bb = garment.boundingBox();
+  const turn = front + Math.PI / 2 + ((o.garmentTurn ?? 0) * Math.PI) / 180;
+  // pen pots and vases have a closed bottom: cut it off so the garment is open at the hem; then keep only the chosen band
+  const trimmed = trimGarment(garment, o, warnings);
+  garment = trimmed.garment;
+  const { bb, gcx, gcy } = trimmed;
   // split long edges first, or the straight triangles of a simple model would cut through the goose's curves once their corners are mapped
   const maxEdge = Math.max(0.75, (bb.max[2] - bb.min[2]) / 30);
   const g = fromManifold(garment.numTri() > 400000 ? garment : garment.refineToLength(maxEdge));
-  const gcx = (bb.min[0] + bb.max[0]) / 2, gcy = (bb.min[1] + bb.max[1]) / 2;
   const gz0 = bb.min[2], gh = bb.max[2] - bb.min[2];
   const N = inner.nTheta, bands = Math.max(8, Math.round(gh / 2));
   // per (angle bin, height band): the garment's nearest and farthest radius
@@ -549,6 +779,8 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     const idx = band * N + bin;
     rmin[idx] = Math.min(rmin[idx], rad[v]); rmax[idx] = Math.max(rmax[idx], rad[v]);
   }
+  // a bin's inner reference is its wall, not a floor remnant or a stray bit near the axis: never less than 60% of its outer radius
+  for (let i = 0; i < N * bands; i++) if (rmin[i] !== Infinity) rmin[i] = Math.max(rmin[i], 0.6 * rmax[i]);
   // fill empty bins from neighbours so every vertex has a reference
   for (let pass = 0; pass < N; pass++) {
     let changed = false;
@@ -578,12 +810,10 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     return row(k0) * (1 - fk) + row(k1) * fk;
   };
   // height map: the top `keepTop` mm of the garment keep their proportions (scaled by the body/garment width ratio), the rest stretches to the hem
-  let meanInner = 0, meanOuter = 0, cnt = 0;
+  let meanInner = 0, cnt = 0;
   for (const row of inner.r) for (const v of row) { meanInner += v; cnt++; }
   meanInner /= cnt || 1;
-  cnt = 0;
-  for (let i = 0; i < N * bands; i++) if (rmax[i] > 0) { meanOuter += rmax[i]; cnt++; }
-  meanOuter /= cnt || 1;
+  const meanOuter = garmentMeanRadius(garment, gcx, gcy);
   const widthScale = meanOuter > 0 ? meanInner / meanOuter : 1;
   const keepTop = Math.min(o.keepTop ?? 0, gh);
   const keptHeight = Math.min(keepTop * widthScale, 0.8 * (o.neck - o.hem));
@@ -616,10 +846,13 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
   // hollow it with the drop-on solid, extended below the hem and above the neck so the cut is clean
   const core = clipProfile(inner, o.hem, o.neck);
   const coreMesh = loftSolid({ ...core, z: core.z.map((z, k) => (k === 0 ? z - 5 : k === core.z.length - 1 ? z + 5 : z)) });
-  const carved = solid.subtract(await toManifold(coreMesh));
+  const carved = shearManifold(solid.subtract(await toManifold(coreMesh)), shear, 1);
   const bodies = carved.decompose().filter((b) => b.volume() > 1);
-  const result = bodies.length > 1 ? Manifold.union(bodies) : bodies[0] ?? carved;
+  let result = bodies.length > 1 ? Manifold.union(bodies) : bodies[0] ?? carved;
   if (bodies.length !== 1) warnings.push(`${bodies.length} separate pieces after hollowing`);
   if (result.volume() < 0.3 * solid.volume()) warnings.push('most of the garment was inside the goose; raise the thickness or use solid mode');
-  return { mesh: fromManifold(result), solid: result, centre: [inner.cx, inner.cy], inner, warnings, mode };
+  let parts: ManifoldT[] | undefined;
+  if (o.formFit && (o.split ?? 'none') === 'none') warnings.push('a form-fitting garment cannot slide on; split it to wear it');
+  if (o.split && o.split !== 'none') ({ solid: result, parts } = await splitGarment(result, cav, o, warnings));
+  return { mesh: fromManifold(result), solid: result, centre: [inner.cx, inner.cy], inner, parts, warnings, mode };
 }
