@@ -96,6 +96,8 @@ node src/cli.ts wrap --garment polo.3mf --liner 1.2 --neck-spread 4 --neck-sprea
 # a model that is not a valid solid is rebuilt on a voxel grid first (--voxel sets the pitch, --no-repair refuses it instead);
 # --smooth-model relaxes a rough mesh a few passes before wrapping
 node src/cli.ts wrap --garment puffer.3mf --voxel 0.3 --keep-top 22
+# a hoodie designed for the goose (hood down, hands in the pocket): shirt body plus parts modelled in Blender (pip install bpy)
+sh scripts/hoodie/build.sh hoodie.stl
 # two halves that clip on with 3 x 1 mm magnets, hugging the chest and tail (writes .a.stl and .b.stl as well)
 node src/cli.ts shirt --split sides --form-fit --split-magnets 3 --split-magnet-dia 3 --split-magnet-thick 1 --out shirt.stl
 
