@@ -46,8 +46,10 @@
               <option value="footprint">the bottom face only</option>
             </select>
           </label>
-          <label>Plug under hollow models: diameter <input type="number" id="prep-plug-d" step="0.5" value="0" /> mm, height <input type="number" id="prep-plug-h" step="0.5" value="8" /> mm</label>
-          <p class="muted small">A plug is a solid cylinder from the base up into the model, so a hollow hat has material to carve and to hold the magnet.</p>
+          <label>Fill the hollow underside <input type="number" id="prep-fill" step="0.5" min="0" value="0" /> mm deep (0 = off)</label>
+          <p class="muted small">Fills the cavity the walls enclose above the magnet point, from its floor up by this depth, following the walls and never through the top, so a hollow hat has material to carve and to hold the magnet. The fill's floor becomes the base; a brim that dips lower hangs below it. 8 mm suits a 4.2 mm magnet.</p>
+          <label>Or a plain plug: diameter <input type="number" id="prep-plug-d" step="0.5" value="0" /> mm, height <input type="number" id="prep-plug-h" step="0.5" value="8" /> mm</label>
+          <p class="muted small">A plug is a solid cylinder from the base up into the model, for models with no enclosed cavity to fill.</p>
         </div>
         <details id="generator">
           <summary>Or generate a plain base</summary>
@@ -77,8 +79,15 @@
           <label>Sink into goose <output id="sink-out">2.0</output> mm
             <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
           </label>
-          <label>Spin <output id="spin-out">0</output>°
-            <input type="range" id="spin" min="-180" max="180" step="5" value="0" />
+          <p class="small muted">Click the model to show rotation rings; drag a ring to tilt or spin it, click empty space to hide them. The sliders fine-tune.</p>
+          <label>Spin (blue ring) <output id="spin-out">0</output>°
+            <input type="range" id="spin" min="-180" max="180" step="1" value="0" />
+          </label>
+          <label>Tilt (red ring) <output id="tilt-x-out">0.0</output>°
+            <input type="range" id="tilt-x" min="-90" max="90" step="0.5" value="0" />
+          </label>
+          <label>Tilt (green ring) <output id="tilt-y-out">0.0</output>°
+            <input type="range" id="tilt-y" min="-90" max="90" step="0.5" value="0" />
           </label>
           <label>Slide X <output id="dx-out">0.0</output> mm
             <input type="range" id="dx" min="-30" max="30" step="0.5" value="0" />

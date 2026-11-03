@@ -174,3 +174,45 @@ test("the app's own painted 3MF export comes back in with its colours", async ()
   for (const v of back.faceMaterial) c[v === 9 ? 3 : v]++;
   assert.deepEqual(c, [9, 1, 2, 0]);
 });
+
+test('fill finds the cavity floor above a dipping brim and stops under the top', async () => {
+  const { fillCavity } = await import('../src/prepare.ts');
+  const { Manifold } = await manifold();
+  // a hollow crown 30 wide, 2 mm walls, 20 tall, open at the bottom, on a brim whose rim dips 6 mm below the crown opening
+  const crown = Manifold.cylinder(20, 15, 15, 64, false).subtract(Manifold.cylinder(19, 13, 13, 64, false).translate(0, 0, -1));
+  const brim = Manifold.cylinder(2, 30, 30, 64, false).subtract(Manifold.cylinder(3, 13, 13, 64, false).translate(0, 0, -0.5));
+  const rim = Manifold.cylinder(6, 30, 30, 64, false).subtract(Manifold.cylinder(7, 28, 28, 64, false).translate(0, 0, -0.5)).translate(0, 0, -6);
+  const hat = crown.add(brim).add(rim);
+  const f = await fillCavity(hat, 8);
+  assert.ok(f, 'cavity expected');
+  assert.ok(Math.abs(f.floor - 6) < 0.3, `floor ${f.floor}`);
+  assert.ok(Math.abs(f.depth - 8) < 0.01, `depth ${f.depth}`);
+  // the fill is the crown's inside, 13 radius, 8 tall, and nothing under the brim
+  assert.ok(Math.abs(f.volume - Math.PI * 13 * 13 * 8) < 0.04 * Math.PI * 13 * 13 * 8, `volume ${f.volume}`);
+  const bb = f.solid.boundingBox();
+  assert.ok(Math.abs(bb.min[2] + 6) < 0.3 && Math.abs(bb.max[2] - 20) < 0.3, `z ${bb.min[2]}..${bb.max[2]}`);
+  assert.equal(f.solid.decompose().length, 1);
+  // deeper than the cavity: the fill stops under the top, with a warning from prepare
+  const deep = await prepareAccessory(hat, { down: '-z', scale: 1, centre: 'bbox', fill: 30 });
+  assert.ok(deep.fill && deep.fill.depth < 19.5 && deep.fill.depth > 17, `depth ${deep.fill?.depth}`);
+  assert.ok(deep.warnings.some((w) => w.includes('stops there')));
+  // a solid block has nothing to fill
+  const none = await prepareAccessory(Manifold.cube([10, 10, 10], true), { down: '-z', scale: 1, centre: 'bbox', fill: 5 });
+  assert.equal(none.fill, undefined);
+  assert.ok(none.warnings.some((w) => w.includes('no hollow')));
+});
+
+test('tilt pivots the accessory on the magnet point', async () => {
+  const { fitAccessory, DEFAULT_PROFILE } = await import('../src/fit.ts');
+  const { Manifold } = await manifold();
+  const goose = Manifold.sphere(40, 64);
+  const profile = { ...DEFAULT_PROFILE, points: { top: { center: [0, 0, 36] as [number, number, number], axis: [0, 0, 1] as [number, number, number], diameter: 10, depth: 4, floor: [0, 0, 32] as [number, number, number], wallFaces: 0 } } };
+  const post = Manifold.cylinder(30, 4, 4, 32, false).add(Manifold.cube([16, 16, 8], false).translate(-8, -8, 0));
+  const upright = await fitAccessory(goose, post, profile, { point: 'top', sink: 1, spin: 0, offset: [0, 0] });
+  const tilted = await fitAccessory(goose, post, profile, { point: 'top', sink: 1, spin: 0, offset: [0, 0], tilt: [30, 0] });
+  const ub = upright.solid.boundingBox(), tb = tilted.solid.boundingBox();
+  assert.ok(Math.abs(ub.max[2] - tb.max[2] - 30 * (1 - Math.cos(Math.PI / 6))) < 2, `top ${ub.max[2]} vs ${tb.max[2]}`);
+  // the frame at an upward axis points local x at -y, so a tilt about it swings the post along world x
+  assert.ok(tb.min[0] < -12 || tb.max[0] > 12, `tilting about x swings the post sideways: x ${tb.min[0]}..${tb.max[0]}`);
+  assert.ok(tilted.volumeAfter > 0.5 * tilted.volumeBefore, 'most of the tilted post remains');
+});

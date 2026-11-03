@@ -36,6 +36,20 @@ await page.click('#fit');
 await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
 console.log('3.', await page.locator('#fit-result').textContent());
 await page.screenshot({ path: join(out, '3-fitted.png') });
+// tilt: the sliders move the preview, the rings appear on a click on the model, and the fit follows
+await page.fill('#tilt-x', '20');
+await page.dispatchEvent('#tilt-x', 'input');
+const [px, py] = await page.evaluate(() => { const p = window.__goose.profile.points.head; return window.__goose.toScreen([p.center[0] + p.axis[0] * 6, p.center[1] + p.axis[1] * 6, p.center[2] + p.axis[2] * 6]); });
+await page.mouse.click(px, py);
+const rings = await page.evaluate(() => window.__goose.ringsShown);
+await page.screenshot({ path: join(out, '3t-rings.png') });
+await page.evaluate(() => window.__goose.showRings(false));
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('3t. rings on click:', rings, '| tilted 20°:', await page.locator('#fit-result').textContent());
+if (!rings) throw new Error('rotation rings did not appear on a click');
+await page.fill('#tilt-x', '0');
+await page.dispatchEvent('#tilt-x', 'input');
 
 // generated base: a dome on the left wing
 await page.click('#generator summary');
@@ -108,8 +122,10 @@ await page.waitForFunction(() => document.getElementById('status').textContent.i
 console.log('6.', await page.locator('#model-info').textContent());
 await page.selectOption('#prep-down', '+z');
 await page.fill('#prep-width', '20');
-await page.fill('#prep-plug-d', '14');
-await page.dispatchEvent('#prep-plug-d', 'change');
+await page.fill('#prep-fill', '6');
+await page.dispatchEvent('#prep-fill', 'change');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Filled'), null, { timeout: 60000 });
+console.log('6f.', await status());
 await page.waitForFunction(() => document.getElementById('status').textContent.includes('scaled'), null, { timeout: 30000 });
 console.log('6b.', await status());
 await page.selectOption('#point', 'head');

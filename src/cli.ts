@@ -2,7 +2,7 @@
 // Headless fitting tool (Phase 1).
 //
 //   node src/cli.ts detect goose/goose.stl [--out goose/profile.json]
-//   node src/cli.ts fit --accessory hat.stl --point head [--sink 2] [--spin 0] [--out fitted.stl]
+//   node src/cli.ts fit --accessory hat.stl --point head [--sink 2] [--spin 0] [--tilt-x 0] [--tilt-y 0] [--out fitted.stl]
 //   node src/cli.ts hole --model goose/goose.stl --at x,y,z --name head --magnet-dia 6 --magnet-thick 3 [--embedded --skin 1] [--out goose/goose.holed.stl]
 //   node src/cli.ts shirt [--hem 46] [--neck 108] [--thickness 1.6] [--clearance 0.4] [--collar tilt|drop] [--collar-gap 1]
 //                         [--neckline v|scoop|crew --neckline-depth 14 --neckline-width 45] [--collar-height 0] [--fabric plain|ribbed|puffer --fabric-depth 0.4 --fabric-pitch 48]
@@ -59,7 +59,7 @@ async function detect() {
 async function fit() {
   const accessoryPath = arg('accessory');
   const point = arg('point');
-  if (!accessoryPath || !point) throw new Error('usage: fit --accessory file.stl --point head [--sink 2] [--spin 0] [--dx 0] [--dy 0] [--magnet-dia 6] [--magnet-thick 3] [--pocket-radial 0] [--pocket-axial 0.1] [--no-pocket] [--out fitted.stl]');
+  if (!accessoryPath || !point) throw new Error('usage: fit --accessory file.stl --point head [--sink 2] [--spin 0] [--tilt-x 0] [--tilt-y 0] [--dx 0] [--dy 0] [--magnet-dia 6] [--magnet-thick 3] [--pocket-radial 0] [--pocket-axial 0.1] [--no-pocket] [--out fitted.stl]');
   const num = (name: string) => (arg(name) === undefined ? undefined : Number(arg(name)));
   const profile: FitProfile = JSON.parse(readFileSync(arg('profile', PROFILE)!, 'utf8'));
   const goose = await toManifold(readStl(arg('goose', GOOSE)!));
@@ -68,6 +68,7 @@ async function fit() {
     point,
     sink: Number(arg('sink', '2')),
     spin: Number(arg('spin', '0')),
+    tilt: [Number(arg('tilt-x', '0')), Number(arg('tilt-y', '0'))],
     offset: [Number(arg('dx', '0')), Number(arg('dy', '0'))],
     pocket: {
       diameter: num('magnet-dia'),

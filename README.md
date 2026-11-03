@@ -49,6 +49,15 @@ tabs drop the loaded model and anything fitted, to start over.
 3MF, make a shirt, wrap it, clear, cut a hole; screenshots in
 `smoke-out/`); it needs Playwright with Chromium available.
 
+On the Accessory tab, a hollow model (a hat open underneath) can be filled
+before the fit: the fill finds the cavity the walls enclose above the magnet
+point, fills it from its floor up by the depth you set, following the walls
+and never through the top, and makes that floor the base, so a cowboy hat
+whose brim dips below the crown opening still gets its magnet in the crown.
+The model's angle is set by clicking it in the view, which shows three
+rotation rings (two tilts and the spin about the magnet axis) to drag, with
+sliders in the panel for fine adjustment; the fit uses the same angles.
+
 Accessories are downloaded models, never built from primitives; see
 [accessories/README.md](accessories/README.md) for the library layout.
 
@@ -132,7 +141,7 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/load-model.ts`, `src/obj.ts`, `src/zip-read.ts` read STL, OBJ and 3MF (pure, shared with the app); a 3MF's colours become material tags on the solid
 - `src/threemf-parse.ts` 3MF parts, transforms, filament slots and slicer paint codes; `src/threemf-write.ts` painted 3MF, one mesh or one part per colour
 - `src/split-colours.ts` splits a painted solid into one body per colour
-- `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, plug
+- `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, fill the hollow underside or add a plug
 - `src/clothing.ts` body profile, contour shirt and garment wrap
 - `src/goose-colors.ts` the goose's per-face filament colours
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)

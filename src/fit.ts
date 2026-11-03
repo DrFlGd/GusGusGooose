@@ -35,6 +35,8 @@ export interface Placement {
   sink: number;
   /** rotation of the accessory about the magnet axis, degrees */
   spin: number;
+  /** tilt of the accessory about its own x then y axes, degrees, pivoting on the magnet point (before the spin) */
+  tilt?: [number, number];
   /** slide of the accessory base in its own XY, mm */
   offset: [number, number];
   /** per-accessory pocket overrides; anything unset mirrors the goose void and the profile */
@@ -125,6 +127,29 @@ export function fromManifoldTagged(man: ManifoldT, firstID: number, materialCoun
   return { mesh, faceMaterial };
 }
 
+/**
+ * Puts decomposed bodies back into one solid. Bodies of negative volume are
+ * sealed pockets (Manifold hands them out inside out); a plain union would
+ * swallow them, so they are turned right side out and subtracted instead.
+ */
+export async function rejoin(bodies: ManifoldT[]): Promise<ManifoldT> {
+  const { Manifold } = await manifold();
+  const solids = bodies.filter((b) => b.volume() > 0);
+  const voids = bodies.filter((b) => b.volume() < 0);
+  let out = solids.length === 1 ? solids[0] : Manifold.union(solids);
+  if (voids.length) {
+    const flipped: ManifoldT[] = [];
+    for (const v of voids) {
+      const m = fromManifold(v);
+      const tri = Uint32Array.from(m.triangles);
+      for (let i = 0; i < tri.length; i += 3) { const t = tri[i + 1]; tri[i + 1] = tri[i + 2]; tri[i + 2] = t; }
+      flipped.push(await toManifold({ positions: m.positions, triangles: tri }));
+    }
+    out = out.subtract(flipped.length === 1 ? flipped[0] : Manifold.union(flipped));
+  }
+  return out;
+}
+
 export function fromManifold(man: ManifoldT): IndexedMesh {
   const m: MeshT = man.getMesh();
   const positions = new Float32Array(m.numVert * 3);
@@ -166,9 +191,10 @@ export async function fitAccessory(
 
   // 1. place the accessory: base at the void mouth, sunk into the goose
   const origin = add(pt.center, scale(pt.axis, -placement.sink));
-  const placed = accessory
-    .translate(placement.offset[0], placement.offset[1], 0)
-    .transform(frameAt(origin, pt.axis, placement.spin) as any);
+  const [tx, ty] = placement.tilt ?? [0, 0];
+  let placed = accessory.translate(placement.offset[0], placement.offset[1], 0);
+  if (tx || ty) placed = placed.rotate([tx, ty, 0]);
+  placed = placed.transform(frameAt(origin, pt.axis, placement.spin) as any);
   const volumeBefore = placed.volume();
 
   // 2. crop the goose to the accessory's neighbourhood, then grow it by the clearance
@@ -202,11 +228,12 @@ export async function fitAccessory(
     fitted = fitted.subtract(pocket);
   }
 
-  // 5. drop slivers (under 1 mm³, from the offset approximation), then check
+  // 5. drop slivers (under 1 mm³, from the offset approximation), then check; a sealed pocket inside the accessory
+  // (a filled hat crown) is a body of negative volume and stays
   const parts = fitted.decompose();
-  const kept = parts.filter((p) => p.volume() >= 1);
-  if (kept.length < parts.length) fitted = kept.length ? Manifold.union(kept) : fitted;
-  const bodies = kept.length;
+  const kept = parts.filter((p) => Math.abs(p.volume()) >= 1);
+  if (kept.length < parts.length) fitted = kept.length ? await rejoin(kept) : fitted;
+  const bodies = kept.filter((p) => p.volume() > 0).length;
   if (bodies === 0) warnings.push('nothing left after the cut: the accessory sits entirely inside the goose');
   if (bodies > 1) warnings.push(`result is ${bodies} separate bodies; the cut split the accessory`);
   const volumeAfter = fitted.volume();

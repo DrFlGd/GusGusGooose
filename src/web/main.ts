@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
 import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
@@ -74,6 +75,8 @@ let profile: FitProfile;
 let accessoryMesh: IndexedMesh | null = null;
 let accessoryManifold: ManifoldT | null = null;
 let accessoryObject: THREE.Mesh | null = null;
+// the accessory hangs in a pivot at the magnet point: the pivot carries the frame and the tilt/spin, the mesh only the slide
+const accessoryPivot = new THREE.Group();
 let fittedObject: THREE.Mesh | null = null;
 let fitted: FitResult | null = null;
 let activePoint = '';
@@ -268,7 +271,7 @@ function clearModel() {
   accessoryMesh = null;
   garmentParts = null;
   loadSerial++;
-  if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); accessoryObject = null; }
+  if (accessoryObject) { accessoryPivot.remove(accessoryObject); accessoryObject.geometry.dispose(); accessoryObject = null; gizmo.detach(); }
   if (ghost) { scene.remove(ghost); ghost.geometry.dispose(); ghost = null; cropKey = ''; }
   for (const id of ['accessory-file', 'cloth-file']) $<HTMLInputElement>(id).value = ''; // so the same file can be loaded again
   $('prepare-controls').classList.add('hidden');
@@ -303,12 +306,16 @@ async function applyPrepare() {
   prep.centre = $<HTMLSelectElement>('prep-centre').value as PrepareOptions['centre'];
   const pd = Number($<HTMLInputElement>('prep-plug-d').value), ph = Number($<HTMLInputElement>('prep-plug-h').value);
   prep.plug = pd > 0 && ph > 0 ? { diameter: pd, height: ph } : undefined;
+  const fillDepth = Number($<HTMLInputElement>('prep-fill').value);
+  prep.fill = fillDepth > 0 ? fillDepth : undefined;
+  if (prep.fill) { status('Filling the hollow underside…'); await new Promise((r) => setTimeout(r, 20)); }
   try {
     const prepared = await prepareAccessory(rawModel, prep);
     accessoryManifold = prepared.solid;
     accessoryMesh = fromManifold(prepared.solid);
     const size = prepared.size.map((v) => v.toFixed(1)).join(' × ');
-    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}. Place it, then Fit.`);
+    const fill = prepared.fill ? ` Filled ${prepared.fill.volume.toFixed(0)} mm³, ${prepared.fill.depth.toFixed(1)} mm deep from a floor ${prepared.fill.floor.toFixed(1)} mm above the lowest point.` : '';
+    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}.${fill}${prepared.warnings.length ? ` ${prepared.warnings.join('; ')}.` : ''} Place it, then Fit.`);
   } catch (err) {
     status(`Prepare failed: ${(err as Error).message}`);
     return;
@@ -319,13 +326,14 @@ async function applyPrepare() {
 function showAccessory() {
   if (!accessoryMesh) return;
   clearFitted();
-  if (accessoryObject) { scene.remove(accessoryObject); accessoryObject.geometry.dispose(); }
+  if (accessoryObject) { accessoryPivot.remove(accessoryObject); accessoryObject.geometry.dispose(); }
   // a model with its own colours is previewed in them
   const tagged = modelTags && accessoryManifold ? fromManifoldTagged(accessoryManifold, modelTags.firstID, modelTags.count, modelTags.fallback) : null;
   accessoryObject = tagged
     ? new THREE.Mesh(colouredGeometry(tagged.mesh, tagged.faceMaterial, palette), accessoryColouredMaterial)
     : new THREE.Mesh(toGeometry(accessoryMesh), accessoryMaterial);
-  scene.add(accessoryObject);
+  accessoryPivot.add(accessoryObject);
+  if (!accessoryPivot.parent) scene.add(accessoryPivot);
   $('accessory-controls').classList.remove('hidden');
   updatePreview();
 }
@@ -334,7 +342,7 @@ $<HTMLInputElement>('accessory-file').onchange = (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (file) loadFile(file);
 };
-for (const id of ['prep-down', 'prep-width', 'prep-scale', 'prep-centre', 'prep-plug-d', 'prep-plug-h']) {
+for (const id of ['prep-down', 'prep-width', 'prep-scale', 'prep-centre', 'prep-plug-d', 'prep-plug-h', 'prep-fill']) {
   $<HTMLInputElement>(id).onchange = () => { applyPrepare(); };
 }
 // drag a file anywhere onto the page
@@ -424,6 +432,7 @@ function placement(): Placement {
     point: activePoint,
     sink: Number($<HTMLInputElement>('sink').value),
     spin: Number($<HTMLInputElement>('spin').value),
+    tilt: [Number($<HTMLInputElement>('tilt-x').value), Number($<HTMLInputElement>('tilt-y').value)],
     offset: [Number($<HTMLInputElement>('dx').value), Number($<HTMLInputElement>('dy').value)],
     pocket: {
       diameter: num('pocket-dia'),
@@ -436,7 +445,7 @@ function placement(): Placement {
 }
 
 function updatePreview() {
-  for (const id of ['sink', 'spin', 'dx', 'dy', 'clearance']) {
+  for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'clearance']) {
     const v = Number($<HTMLInputElement>(id).value);
     $(`${id}-out`).textContent = id === 'spin' ? v.toFixed(0) : id === 'clearance' ? v.toFixed(2) : v.toFixed(1);
   }
@@ -445,15 +454,48 @@ function updatePreview() {
   if (!pt) return;
   const pl = placement();
   const origin: V3 = [pt.center[0] - pt.axis[0] * pl.sink, pt.center[1] - pt.axis[1] * pl.sink, pt.center[2] - pt.axis[2] * pl.sink];
-  const m = new THREE.Matrix4().fromArray(frameAt(origin, pt.axis, pl.spin));
-  m.multiply(new THREE.Matrix4().makeTranslation(pl.offset[0], pl.offset[1], 0));
-  accessoryObject.matrixAutoUpdate = false;
-  accessoryObject.matrix.copy(m);
+  // pivot = frame (with the spin) · tilt about y · tilt about x, as fitAccessory applies them; the mesh carries the slide
+  const frame = new THREE.Matrix4().fromArray(frameAt(origin, pt.axis, pl.spin));
+  const tilt = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pl.tilt![0]), THREE.MathUtils.degToRad(pl.tilt![1]), 0, 'ZYX'));
+  frame.multiply(tilt).decompose(accessoryPivot.position, accessoryPivot.quaternion, accessoryPivot.scale);
+  accessoryObject.position.set(pl.offset[0], pl.offset[1], 0);
   accessoryObject.visible = !fittedObject;
+  if (fittedObject) gizmo.detach();
 }
 
-for (const id of ['sink', 'spin', 'dx', 'dy', 'clearance']) {
+for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'clearance']) {
   $<HTMLInputElement>(id).oninput = () => { clearFitted(); updatePreview(); };
+}
+
+// ---------- rotation rings on the accessory ----------
+// a click on the accessory shows three rings (red and green tilt it, blue spins it about the magnet axis); dragging a ring
+// turns the pivot, which is read back into the sliders so the fit uses exactly what is shown
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setMode('rotate');
+gizmo.setSpace('local');
+gizmo.setSize(0.9);
+scene.add(gizmo.getHelper());
+gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !(e as unknown as { value: boolean }).value; });
+gizmo.addEventListener('objectChange', () => {
+  const pt = profile.points[activePoint];
+  if (!pt) return;
+  const pl = placement();
+  const origin: V3 = [pt.center[0] - pt.axis[0] * pl.sink, pt.center[1] - pt.axis[1] * pl.sink, pt.center[2] - pt.axis[2] * pl.sink];
+  // what is left once the bare frame is taken off the pivot: Rz(spin) · Ry(tilt y) · Rx(tilt x)
+  const bare = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().fromArray(frameAt(origin, pt.axis, 0)));
+  const local = bare.invert().multiply(accessoryPivot.quaternion);
+  const e = new THREE.Euler().setFromQuaternion(local, 'ZYX');
+  const set = (id: string, deg: number, step: number, limit: number) => { $<HTMLInputElement>(id).value = String(Math.max(-limit, Math.min(limit, Math.round(deg / step) * step))); };
+  set('tilt-x', THREE.MathUtils.radToDeg(e.x), 0.5, 90);
+  set('tilt-y', THREE.MathUtils.radToDeg(e.y), 0.5, 90);
+  set('spin', THREE.MathUtils.radToDeg(e.z), 1, 180);
+  clearFitted();
+  updatePreview();
+});
+/** Shows the rings on the accessory, or hides them. */
+function showGizmo(on: boolean) {
+  if (on && accessoryObject && accessoryObject.visible) gizmo.attach(accessoryPivot);
+  else gizmo.detach();
 }
 for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial', 'pocket-none']) {
   $<HTMLInputElement>(id).onchange = clearFitted;
@@ -678,6 +720,7 @@ function setTab(name: string) {
   guides.visible = name === 'clothing';
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   applyFocus();
+  if (name !== 'accessory') showGizmo(false);
   // in paint mode the left button paints and the right button orbits
   controls.mouseButtons = name === 'paint'
     ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
@@ -821,8 +864,15 @@ const raycaster = new THREE.Raycaster();
 let downAt = [0, 0];
 renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (tab !== 'hole' || !gooseObject) return;
   if (Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return; // a drag, not a click
+  if (tab === 'accessory' && accessoryObject && accessoryObject.visible && !gizmo.dragging) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, camera);
+    showGizmo(raycaster.intersectObject(accessoryObject).length > 0);
+    return;
+  }
+  if (tab !== 'hole' || !gooseObject) return;
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
@@ -886,6 +936,8 @@ function download(name: string, bytes: Uint8Array) {
 (window as unknown as { __goose: unknown }).__goose = {
   get profile() { return profile; },
   get gooseVisible() { return gooseObject.visible; },
+  get ringsShown() { return !!gizmo.object; },
+  showRings(on: boolean) { showGizmo(on); },
   toScreen(p: V3) {
     const v = new THREE.Vector3(...p).project(camera);
     const rect = renderer.domElement.getBoundingClientRect();
