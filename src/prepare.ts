@@ -34,8 +34,11 @@ export interface PrepareOptions {
    * underside at `at` (default: the point deepest inside the model's
    * footprint), the model lifted by its height. The puck becomes the base and
    * the magnet point, so the model slides to put `at` on the origin.
+   * `attach: 'behind'` puts the puck beside the model instead, let into its
+   * back (+y) at the bottom, both standing on the base: the model stands just
+   * in front of the puck (`at` then only sets the puck's x).
    */
-  puck?: { diameter: number; height: number; at?: [number, number] };
+  puck?: { diameter: number; height: number; at?: [number, number]; attach?: 'under' | 'behind' };
 }
 
 export const DEFAULT_PREPARE: PrepareOptions = { down: '-z', scale: 1, centre: 'bbox' };
@@ -97,13 +100,28 @@ export async function prepareAccessory(raw: ManifoldT, opts: PrepareOptions): Pr
   }
   let puck: Prepared['puck'];
   if (opts.puck && opts.puck.diameter > 0 && opts.puck.height > 0) {
-    const at = opts.puck.at ?? footprintPole(m);
     const r = opts.puck.diameter / 2;
     bb = m.boundingBox();
-    const sink = Math.min(1, Math.max(0.2, (bb.max[2] - bb.min[2]) / 2));
-    const cyl = Manifold.cylinder(opts.puck.height + sink, r, r, 64, false).translate(at[0], at[1], -opts.puck.height);
-    m = m.add(cyl).translate(-at[0], -at[1], opts.puck.height);
-    puck = { at };
+    if (opts.puck.attach === 'behind') {
+      // beside the model's back at the bottom: x from `at` (default the middle), y so the puck's front is let in by
+      // up to 1.5 mm, measured on the model's lowest slab, where they meet
+      // the model's back where the puck meets it: its lowest slab, in a strip as wide as half the puck
+      const x = opts.puck.at?.[0] ?? (bb.min[0] + bb.max[0]) / 2;
+      const strip = m.intersect(Manifold.cube([r, bb.max[1] - bb.min[1] + 2, Math.min(opts.puck.height, bb.max[2] - bb.min[2])], false).translate(x - r / 2, bb.min[1] - 1, bb.min[2]));
+      const sb = strip.isEmpty() ? bb : strip.boundingBox();
+      if (strip.isEmpty()) warnings.push('nothing of the model is over the puck there; move it along the model');
+      const overlap = Math.min(1.5, (sb.max[1] - sb.min[1]) / 2);
+      const at: [number, number] = [x, sb.max[1] + r - overlap];
+      const cyl = Manifold.cylinder(opts.puck.height, r, r, 64, false).translate(at[0], at[1], bb.min[2]);
+      m = m.add(cyl).translate(-at[0], -at[1], -bb.min[2]);
+      puck = { at };
+    } else {
+      const at = opts.puck.at ?? footprintPole(m);
+      const sink = Math.min(1, Math.max(0.2, (bb.max[2] - bb.min[2]) / 2));
+      const cyl = Manifold.cylinder(opts.puck.height + sink, r, r, 64, false).translate(at[0], at[1], -opts.puck.height);
+      m = m.add(cyl).translate(-at[0], -at[1], opts.puck.height);
+      puck = { at };
+    }
   }
   bb = m.boundingBox();
   return { solid: m, scale, size: [bb.max[0] - bb.min[0], bb.max[1] - bb.min[1], bb.max[2] - bb.min[2]], fill, puck, warnings };

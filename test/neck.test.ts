@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { manifold, toManifold, type FitProfile } from '../src/fit.ts';
+import { frameFromAxes, manifold, toManifold, type FitProfile } from '../src/fit.ts';
 import { parseStl } from '../src/stl.ts';
-import { DEFAULT_NECK, fitOnNeck, forwardOf, makeNeckBand } from '../src/neck.ts';
+import { DEFAULT_NECK, fitOnNeck, forwardOf, makeNeckBand, SLOT_SKIN } from '../src/neck.ts';
 import { holdsMagnet, prepareAccessory } from '../src/prepare.ts';
 
 const goose = await toManifold(parseStl(readFileSync('goose/goose.stl')));
@@ -35,14 +35,35 @@ test('a bow-tie block fits on the band: carved to it and slotted for the tabs, t
   const r = await fitOnNeck(goose, bow, profile, band, { sink: 0.5, spin: 0, offset: [0, 0] }, DEFAULT_NECK);
   assert.equal(r.bodies, 1, r.warnings.join('; '));
   const slot = Math.PI * ((DEFAULT_NECK.tabDiameter + DEFAULT_NECK.tabClearance) / 2) ** 2 * (DEFAULT_NECK.tabLength + DEFAULT_NECK.tabClearance);
-  assert.ok(r.volumeBefore - r.volumeAfter > 2 * slot * 0.9, `removed ${(r.volumeBefore - r.volumeAfter).toFixed(0)} mm³, slots alone are ${(2 * slot).toFixed(0)}`);
+  assert.ok(r.volumeBefore - r.volumeAfter > slot * 0.9, `removed ${(r.volumeBefore - r.volumeAfter).toFixed(0)} mm³, slots alone are ${(2 * slot).toFixed(0)}`);
   // the tabs go into the slots: the band and the fitted bow do not overlap
   assert.ok(r.solid.intersect(band.band).volume() < 0.5, 'the tabs sit in the slots with clearance');
-  assert.ok(Math.abs(r.band.volume() - band.band.volume()) < 1e-6, 'the band is returned as it was');
+  assert.ok(Math.abs(r.band.volume() - band.band.volume()) < 1e-3, 'the 4 mm bow takes the full tabs, so the band is as it was');
   // the bow sits in front of the neck, upright
   const bb = r.solid.boundingBox();
   assert.ok(bb.max[2] - bb.min[2] > 7.5 && bb.max[2] - bb.min[2] < 8.5, `bow height ${bb.max[2] - bb.min[2]}`);
   assert.ok(bb.min[1] < band.point.center[1] - 3, 'the bow stands forward of the band');
+});
+
+test('tab slots are blind: they stop short of the front, and tabs shorten on a thin accessory', async () => {
+  const { Manifold } = await manifold();
+  const band = await makeNeckBand(goose, profile, DEFAULT_NECK);
+  for (const thick of [3, 6]) {
+    const plate = Manifold.cube([24, 8, thick], false).translate(-12, -4, 0);
+    const r = await fitOnNeck(goose, plate, profile, band, { sink: 0, spin: 0, offset: [0, 0] }, DEFAULT_NECK);
+    // a line straight through each tab's centre meets material in front of the slot: nothing is open at the front
+    for (const t of band.tabs) {
+      const ray = Manifold.cylinder(40, 0.3, 0.3, 12, false).transform(frameFromAxes(t, [0, 0, 1], band.forward) as any);
+      const before = plate.volume();
+      void before;
+      const inFront = r.solid.intersect(ray).volume();
+      assert.ok(inFront > Math.PI * 0.09 * (SLOT_SKIN - 0.1), `${thick} mm: material in front of the slot ${inFront.toFixed(3)} mm³`);
+    }
+    assert.equal(r.solid.genus(), 0, `${thick} mm: the slots do not open through (genus ${r.solid.genus()})`);
+    if (thick === 3) assert.ok(r.tabLength >= 1 && r.tabLength < DEFAULT_NECK.tabLength + 0.01, `3 mm: tabs ${r.tabLength}`);
+    if (thick === 6) assert.equal(r.tabLength, DEFAULT_NECK.tabLength);
+    assert.ok(r.solid.intersect(r.band).volume() < 0.5, `${thick} mm: the tabs sit in their slots`);
+  }
 });
 
 test('a thin sword gets a puck under its widest part and can then hold a magnet', async () => {
@@ -59,6 +80,13 @@ test('a thin sword gets a puck under its widest part and can then hold a magnet'
   assert.equal(r.solid.decompose().length, 1);
   const bb = r.solid.boundingBox();
   assert.ok(Math.abs(bb.min[2]) < 1e-6, 'the puck is the base');
+  // behind: the puck stands beside the sword's back (+y), both on the base, the sword not lifted
+  const behind = await prepareAccessory(sword, { down: '-z', scale: 1, centre: 'bbox', puck: { diameter: 12, height: 6, attach: 'behind' } });
+  const bbb = behind.solid.boundingBox();
+  assert.ok(Math.abs(bbb.min[2]) < 1e-6 && Math.abs(bbb.max[2] - 6) < 0.01, `behind: z ${bbb.min[2]}..${bbb.max[2]}`);
+  assert.ok(bbb.min[1] < -6 - 1 && bbb.max[1] < 6.01, `behind: the sword is in front of the puck, y ${bbb.min[1].toFixed(1)}..${bbb.max[1].toFixed(1)}`);
+  assert.equal(await holdsMagnet(behind.solid, 6, 3), true);
+  assert.equal(behind.solid.decompose().length, 1);
   // a chosen spot wins over the pole
   const chosen = await prepareAccessory(sword, { down: '-z', scale: 1, centre: 'bbox', puck: { diameter: 10, height: 5, at: [15, 0] } });
   assert.deepEqual(chosen.puck!.at, [15, 0]);

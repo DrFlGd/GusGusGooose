@@ -215,8 +215,9 @@ simplify. An SVG is parsed without the DOM and keeps one region per fill.
 lets each colour into the face as an inlay (smallest regions last so
 details win), tagging each with its material so the result goes through
 fit, paint and export like an imported 3MF. The mount is a puck behind the
-plate (flat) or under its bottom edge (standing, rotated so the picture is
-vertical with its front away from the goose), or the plate itself; the
+plate (flat) or, standing (rotated so the picture is vertical with its
+front away from the goose), behind it or under its bottom edge (see the
+next section), or the plate itself; the
 model slides so the mount is at the origin, where the fit cuts the pocket.
 Defaults follow the point: standing on the head and facing the beak (the
 spin is set from the head-to-beak direction), flat elsewhere with the puck
@@ -243,6 +244,66 @@ puck only when that probe is not solid, unless told always or never. The
 accessory view lets any mount be moved by clicking the model: the click is
 taken into the model's frame and becomes the puck's or the picture's mount
 offset, or, for a plain model, a slide of the model over the magnet.
+
+## Print Factory's shell, Prepare image, and mounts per position (Jerred, 2026-11-03, evening)
+
+Jerred asked for four things after trying the picture accessories: adopt
+the Print Factory GUI (it is built for exporting print models), bring
+over its image editing, let each position choose how the puck meets the
+model, and fix the eyes, which still sat a few mm proud. What changed:
+
+- **Layout.** The page is Print Factory's shell: a top bar (title, mode
+  tabs, light/dark), then three columns: settings, the view, export. The
+  app is exactly the window's height with overflow hidden, and each side
+  column scrolls on its own. The old double scroll came from the canvas:
+  `setPixelRatio` plus `setSize(w, h, false)` left its CSS size at its
+  buffer size (w × the pixel ratio), so the view could scroll and push
+  the settings off. Now the canvas is sized by CSS to fill the view and a
+  `ResizeObserver` sets the buffer. The view has buttons for iso, front,
+  side and top views (taken from the goose's own forward direction, since
+  it is turned on its base), Fit, and Hide goose, which replaces the two
+  tick boxes. Export (3MF with colours, STL, split by colour) is always on
+  the right and says what it will give.
+- **Prepare image.** Print Factory's dialog, ported to plain DOM
+  (`src/web/prepare-image.ts`): original and result side by side, remove
+  background with a tolerance, colours, a chip per colour to drop it,
+  one colour only, smoothing, specks, exposure, contrast, saturation, and
+  Ctrl + scroll zoom. Confirm traces with exactly those settings; Adjust
+  reopens it on the same picture. One change to the vendored `quantize`:
+  it learns the palette from flat pixels only (four neighbours opaque and
+  within 0.04 in OKLab), falling back to all pixels for noisy photos.
+  Without it, asking for two colours on a smooth-edged red heart with a
+  black centre spent one colour on the pink blend along the edge and
+  merged the black into the red.
+- **SVG orientation.** `parseSvg` already turns the page's y-down into
+  y-up; the app flipped it again, so every SVG came out upside down (the
+  candy cane's hook at the bottom). Fixed, and the smoke test now checks
+  the hook is at the top.
+- **Mounts per position.** A picture's puck is parallel (the picture lies
+  on the goose, puck under its back) or perpendicular (the picture
+  stands); a standing picture's puck joins its back (it rests on the goose
+  behind the picture, let 1.5 mm into it at its bottom, and the picture
+  stands just in front) or its bottom edge. A model's puck joins its
+  underside or its back (measured on a strip of the model's lowest slab at
+  the puck's x, so the puck meets material). The head starts with a
+  standing picture and its puck behind, turned to face the beak.
+- **Placement per position.** Sink, spin, tilts, slides, the mount and a
+  moved magnet are kept per position: going to another position starts it
+  from its own defaults (sink 0 and no magnet on the neck) and coming back
+  restores what was set; a new model clears them all.
+- **Blind slots.** The tab slots no longer go through: each stops 0.8 mm
+  short of the accessory's front, measured with a probe along each tab,
+  and the tabs are shortened to the room left (both the same), or left off
+  with a note to glue when even 1 mm will not fit. The fit carves against
+  the band without its tabs and returns the band with the tabs at the
+  length used; the view shows that band after the fit.
+- **Eyes.** The plug was cut flat 0.3 mm past each mouth, but the channel
+  meets the head at a slant: one side of the rim is 2.3 to 2.7 mm higher
+  than the other, so the flat end stood proud of the low side. Each half
+  of the plug is now capped to the head itself: 48 rays along the channel
+  just outside its wall find the rim, a plane is fitted, and the cap
+  follows that plane plus each ray's difference from it, 0.03 mm out.
+  Sections through both eyes show the caps running rim to rim.
 
 ## Still needed from Jerred
 

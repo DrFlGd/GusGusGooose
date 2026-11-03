@@ -22,8 +22,17 @@ export interface FlatDesign {
 export interface FlatMount {
   /** puck: a cylinder for the magnet on the back or under the bottom edge; plate: the magnet goes into the plate itself; none */
   kind: 'puck' | 'plate' | 'none';
-  /** flat lies on the goose with its back down; standing stands on its bottom edge, face out */
+  /**
+   * flat: the magnet is parallel to the picture, which lies on the goose with its back down; standing: the magnet is
+   * perpendicular to the picture, which stands up on the goose, face out
+   */
   orientation: 'flat' | 'standing';
+  /**
+   * the surface the puck joins: the picture's back (flat: under the picture; standing: behind it at its bottom
+   * edge, so the puck rests on the goose with the picture just in front of it) or its bottom edge (standing only:
+   * the puck right under the edge, the picture centred on it). Default: back.
+   */
+  attach?: 'back' | 'bottom';
   /** where the puck meets the picture, mm from the picture's centre (default: the deepest point inside the outline, or the bottom centre when standing) */
   at?: [number, number];
   diameter: number;
@@ -127,19 +136,30 @@ export async function buildFlat(design: FlatDesign, opts: FlatOptions): Promise<
   const plateContours = (plate.toPolygons() as [number, number][][]).map((p) => p.flat());
   let mountAt: [number, number] = m.at ?? (m.orientation === 'standing' ? [0, -b.height * k / 2] : poleOf(plateContours));
   if (m.orientation === 'standing') {
-    // image y becomes up; the plate's back faces +y and its front -y, the bottom edge at the puck's top
+    // image y becomes up; the plate's back faces +y and its front -y, its bottom edge at z = 0
     const bottom = -b.height * k / 2;
     mountAt = [mountAt[0], bottom];
     solid = solid.rotate([90, 0, 0]).translate(0, depth / 2, -bottom);
-    if (m.kind === 'puck') {
-      const puck = Manifold.cylinder(m.height + Math.min(1.5, depth * 0.6), m.diameter / 2, m.diameter / 2, 64, false).translate(mountAt[0], 0, 0);
-      solid = solid.translate(0, 0, m.height).add(puck);
-      if (m.diameter < depth) warnings.push('the puck is narrower than the plate is thick');
-    } else if (m.kind === 'plate') {
-      warnings.push('a standing picture needs a puck; the magnet cannot go into its edge');
+    const r = m.diameter / 2;
+    if (m.kind === 'puck' && (m.attach ?? 'back') === 'back') {
+      // the puck stands on the goose behind the picture, let into its back; the picture rests beside it, just in front
+      const overlap = Math.min(1.5, depth * 0.5);
+      const py = depth / 2 + r - overlap;
+      const puck = Manifold.cylinder(m.height, r, r, 64, false).translate(mountAt[0], py, 0);
+      solid = solid.add(puck).translate(-mountAt[0], -py, 0);
+      const hb = b.height * k;
+      if (m.height > hb * 0.6) warnings.push(`the puck is ${m.height.toFixed(1)} mm tall, most of the picture's ${hb.toFixed(1)} mm height`);
+    } else {
+      if (m.kind === 'puck') {
+        const puck = Manifold.cylinder(m.height + Math.min(1.5, depth * 0.6), r, r, 64, false).translate(mountAt[0], 0, 0);
+        solid = solid.translate(0, 0, m.height).add(puck);
+        if (m.diameter < depth) warnings.push('the puck is narrower than the plate is thick');
+      } else if (m.kind === 'plate') {
+        warnings.push('a standing picture needs a puck; the magnet cannot go into its edge');
+      }
+      // the magnet is at the origin: the picture slides so the mount is there
+      solid = solid.translate(-mountAt[0], 0, 0);
     }
-    // the magnet is at the origin: the picture slides so the mount is there
-    solid = solid.translate(-mountAt[0], 0, 0);
   } else {
     if (m.kind === 'puck') {
       if (!pointInside(plateContours, mountAt[0], mountAt[1])) warnings.push('the puck sits outside the picture; move it onto the outline');

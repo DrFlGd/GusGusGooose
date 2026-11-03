@@ -57,9 +57,29 @@ test('a flat accessory has a plate, inlays per colour, a puck under it and fits 
   assert.ok(!fit.warnings.some((w) => /floor/.test(w)), fit.warnings.join('; '));
 });
 
+test('a standing picture with its puck behind: the puck rests on the goose, the picture just in front of it', async () => {
+  const design: FlatDesign = { ...traceImage(caneRaster(), { colors: 3, background: false, minPixels: 10 }) };
+  const r = await buildFlat(design, { ...DEFAULT_FLAT, width: 20, depth: 3, mount: { kind: 'puck', orientation: 'standing', attach: 'back', diameter: 14, height: 7 } });
+  const bb = r.solid.boundingBox();
+  assert.ok(Math.abs(bb.min[2]) < 1e-6, 'puck and picture both start at z = 0');
+  assert.ok(bb.max[2] > 49 && bb.max[2] < 51, `the picture stands ${bb.max[2]} tall, not lifted by the puck`);
+  // the magnet is at the origin, inside the puck; the picture is in front (-y) of it, the puck's front let into its back
+  const puckOnly = r.solid.intersect((await manifold()).Manifold.cylinder(5, 6.9, 6.9, 64, false));
+  assert.ok(puckOnly.volume() > Math.PI * 6.9 * 6.9 * 5 * 0.95, 'the puck is solid round the origin');
+  // 3 mm plate, the puck let 1.5 mm into its back: the front is 7 + 3 - 1.5 mm ahead of the magnet
+  assert.ok(Math.abs(bb.min[1] + 8.5) < 0.05, `the picture's front is at y ${bb.min[1].toFixed(2)}`);
+  assert.equal(r.solid.decompose().length, 1, 'one body');
+  // it fits the head like any accessory: the pocket lands in the puck
+  const goose = await toManifold(parseStl(readFileSync('goose/goose.stl')));
+  const profile: FitProfile = JSON.parse(readFileSync('goose/profile.json', 'utf8'));
+  const fit = await fitAccessory(goose, r.solid, profile, { point: 'head', sink: 1, spin: 0, offset: [0, 0] });
+  assert.equal(fit.bodies, 1);
+  assert.ok(!fit.warnings.some((w) => /floor/.test(w)), fit.warnings.join('; '));
+});
+
 test('a standing picture has its puck under the bottom edge and the face vertical', async () => {
   const design: FlatDesign = { ...traceImage(caneRaster(), { colors: 3, background: false, minPixels: 10 }) };
-  const r = await buildFlat(design, { ...DEFAULT_FLAT, width: 20, depth: 3, mount: { kind: 'puck', orientation: 'standing', diameter: 14, height: 5 } });
+  const r = await buildFlat(design, { ...DEFAULT_FLAT, width: 20, depth: 3, mount: { kind: 'puck', orientation: 'standing', attach: 'bottom', diameter: 14, height: 5 } });
   const bb = r.solid.boundingBox();
   assert.ok(Math.abs(bb.min[2]) < 1e-6, 'base at z = 0');
   assert.ok(bb.max[2] > 50 && bb.max[2] < 56, `stands ${bb.max[2]} tall`);

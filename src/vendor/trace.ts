@@ -1,4 +1,6 @@
 // Vendored from DrFlGd/Print-Factory (MIT, see LICENSE-print-factory in this folder), adapted to this repo's imports.
+// Changed here: `quantize` learns its palette from flat pixels only, so the blended pixels along smooth (anti-aliased)
+// edges cannot take a palette slot from a real colour.
 /**
  * Images to outlines.
  *
@@ -293,8 +295,24 @@ export function quantize(img: Raster, colors: number, seed = 7): Quantized {
   if (!opaque.length) return { width: img.width, height: img.height, labels, palette: [], counts: [] };
   const k = Math.max(1, Math.min(colors, opaque.length));
   const rand = rng(seed);
-  const step = Math.max(1, Math.floor(opaque.length / 20000));
-  const sample = opaque.filter((_, i) => i % step === 0);
+  // learn the palette from flat pixels: ones whose four neighbours are opaque and nearly the same colour. The blend
+  // along a smooth edge (red into a removed white, say) is then never a palette colour of its own; every pixel is still
+  // given its nearest colour below. A noisy photo has few flat pixels, so it falls back to all of them.
+  const w = img.width;
+  const FLAT = 0.04 * 0.04;
+  const isFlat = (p: number) => {
+    const x = p % w;
+    for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+      if (q < 0 || q >= n || img.data[q * 4 + 3]! < 128) return false;
+      const a = lab[p * 3]! - lab[q * 3]!, b = lab[p * 3 + 1]! - lab[q * 3 + 1]!, e = lab[p * 3 + 2]! - lab[q * 3 + 2]!;
+      if (a * a + b * b + e * e > FLAT) return false;
+    }
+    return true;
+  };
+  const flat = opaque.filter(isFlat);
+  const learn = flat.length >= Math.max(k * 16, opaque.length * 0.25) ? flat : opaque;
+  const step = Math.max(1, Math.floor(learn.length / 20000));
+  const sample = learn.filter((_, i) => i % step === 0);
   const d2 = (p: number, c: number[]) => {
     const a = lab[p * 3]! - c[0]!;
     const b = lab[p * 3 + 1]! - c[1]!;

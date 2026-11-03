@@ -75,14 +75,19 @@ export async function buildGoose(parts: Part[], extraHoles: VoidPrimitive[] = []
 
 /**
  * Closes the eyes: the channel through the head whose radius matches the eye
- * pins is filled with a plug in the eye colour, reaching just past each
- * mouth, so the head is closed for every boolean and each eye shows as a
- * black disc flush with the side of the head (the printed eyes sit flush;
- * Jerred, 2026-11-03). The eye pieces themselves are not placed. Returns the
- * plug, or null with a note when the eyes and the head do not match.
+ * pins is filled with a plug in the eye colour, so the head is closed for
+ * every boolean and each eye shows as a black patch flush with the side of
+ * the head (the printed eyes sit flush; Jerred, 2026-11-03). The channel
+ * meets the head at a steep slant (about 2.5 mm higher on one side of the
+ * hole than the other), so a flat plug end stands proud on one side: each end
+ * is instead capped by a surface spanning the hole, which meets the head
+ * exactly round the rim (measured by casting a ray along the channel just
+ * outside its wall at each angle) and is a best-fit plane plus the rim's own
+ * departure from it, blended in from the centre. The eye pieces themselves
+ * are not placed. Returns the plug, or null with a note when the eyes and the
+ * head do not match.
  */
 export async function seatEyes(goose: ManifoldT, eyes: Part, material: number, firstID: number, log = (s: string) => console.log(s)): Promise<ManifoldT[] | null> {
-  const { Manifold } = await manifold();
   const f = (n: number) => n.toFixed(1);
   const pieces = (await toManifold(eyes.mesh)).decompose().filter((p) => p.volume() > 1);
   const pins = pieces.map((p) => {
@@ -92,25 +97,118 @@ export async function seatEyes(goose: ManifoldT, eyes: Part, material: number, f
     for (let z = bb.min[2] + 0.2; z < bb.max[2] - 0.2; z += 0.1) areas.push([z, p.slice(z).area()]);
     const widest = Math.max(...areas.map((a) => a[1]));
     const top = areas.find((a) => a[1] >= widest * 0.98)![0];
-    return { solid: p, radius: Math.sqrt(widest / Math.PI), length: top - bb.min[2], top, center: [(bb.min[0] + bb.max[0]) / 2, (bb.min[1] + bb.max[1]) / 2] as [number, number] };
+    return { radius: Math.sqrt(widest / Math.PI), length: top - bb.min[2] };
   });
   if (!pins.length) { log('  eyes: no pieces'); return null; }
+  const mesh = fromManifold(goose);
   const tubes: Tube[] = [];
-  findVoids(fromManifold(goose), tubes);
+  findVoids(mesh, tubes);
   const r = pins[0].radius;
   const channel = tubes.filter((t) => Math.abs(t.radius - r) < 0.6).sort((a, b) => b.wallFaces - a.wallFaces)[0];
   if (!channel) { log(`  eyes: no channel through the goose matches the ${f(r * 2)} mm pins (tubes: ${tubes.map((t) => `${f(t.radius * 2)} mm x ${f(t.length)}`).join(', ') || 'none'})`); return null; }
   log(`  eyes: ${pins.length} pieces, ${f(r * 2)} mm pins ${f(pins[0].length)} mm long; channel ${f(channel.radius * 2)} x ${f(channel.length)} mm at (${channel.center.map(f).join(', ')}) axis (${channel.axis.map(f).join(', ')})`);
-  const toward = (d: [number, number, number]) => {
-    const theta = (Math.acos(Math.max(-1, Math.min(1, d[2]))) * 180) / Math.PI;
-    const phi = (Math.atan2(d[1], d[0]) * 180) / Math.PI;
-    return [0, theta, phi] as [number, number, number];
-  };
-  const mid = channel.ends[0].map((v, i) => (v + channel.ends[1][i]) / 2) as [number, number, number];
-  // 0.3 mm past each mouth, so the plug's flat ends cover the curved surface round the hole
-  const filler = Manifold.cylinder(channel.length + 0.6, channel.radius + 0.1, channel.radius + 0.1, 48, true).rotate(toward(channel.axis)).translate(mid);
-  return [await retag(filler, firstID, material)];
+  const mid = channel.ends[0].map((v, i) => (v + channel.ends[1][i]) / 2) as V3;
+  const plugs: ManifoldT[] = [];
+  const notes: string[] = [];
+  for (const side of [-1, 1]) {
+    const half = await capPlug(mesh, mid, channel.axis.map((v) => v * side) as V3, channel.radius + 0.1, channel.length / 2);
+    plugs.push(half.plug);
+    notes.push(`rim ${f(half.rimLow)} to ${f(half.rimHigh)} mm out${half.misses ? `, ${half.misses} rays missed` : ''}`);
+  }
+  const { Manifold } = await manifold();
+  const plug = Manifold.union(plugs);
+  log(`  eyes: plug ${f(plug.volume())} mm³, capped to the head (${notes.join('; ')})`);
+  return [await retag(plug, firstID, material)];
 }
+
+type V3 = [number, number, number];
+
+/**
+ * Half of the eye plug: a cylinder of radius `r` from just behind `mid` out
+ * along `dir`, whose end follows the head's surface across the hole. `mesh`
+ * is the head with the channel open.
+ */
+async function capPlug(mesh: { positions: Float32Array; triangles: Uint32Array }, mid: V3, dir: V3, r: number, halfLength: number) {
+  const N = 48, K = 6;
+  const helper: V3 = Math.abs(dir[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  const e1 = norm(cross(helper, dir)), e2 = cross(dir, e1);
+  const at = (rho: number, th: number, t: number): V3 => [0, 1, 2].map((i) => mid[i] + dir[i] * t + (e1[i] * Math.cos(th) + e2[i] * Math.sin(th)) * rho) as V3;
+  // the triangles near this mouth, for the rays
+  const reach = halfLength + r + 6;
+  const near: number[] = [];
+  for (let t = 0; t < mesh.triangles.length; t += 3) {
+    const v = mesh.triangles[t] * 3;
+    const d = [mesh.positions[v] - mid[0], mesh.positions[v + 1] - mid[1], mesh.positions[v + 2] - mid[2]];
+    const along = d[0] * dir[0] + d[1] * dir[1] + d[2] * dir[2];
+    if (along < -1 || along > reach || Math.hypot(...d) > reach + 2) continue;
+    near.push(t);
+  }
+  // the rim: where a ray along the channel, just outside its wall, leaves the head
+  const rim: number[] = [];
+  let misses = 0;
+  for (let j = 0; j < N; j++) {
+    const th = (j / N) * Math.PI * 2;
+    const o = at(r + 0.02, th, 0);
+    let best = Infinity;
+    for (const t of near) {
+      const hit = rayTriangle(o, dir, mesh, t);
+      if (hit > 0.2 && hit < best) best = hit;
+    }
+    if (!Number.isFinite(best)) { misses++; best = halfLength; }
+    rim.push(best);
+  }
+  // a plane through the rim (t = c0 + c1 cos + c2 sin at the rim radius), plus the rim's own departure from it, blended in from the centre
+  let c0 = 0, c1 = 0, c2 = 0;
+  for (let j = 0; j < N; j++) { const th = (j / N) * Math.PI * 2; c0 += rim[j] / N; c1 += (2 * rim[j] * Math.cos(th)) / N; c2 += (2 * rim[j] * Math.sin(th)) / N; }
+  const cap = (k: number, j: number) => {
+    const th = (j / N) * Math.PI * 2, s = k / K;
+    const plane = c0 + s * (c1 * Math.cos(th) + c2 * Math.sin(th));
+    return plane + s * (rim[j] - (c0 + c1 * Math.cos(th) + c2 * Math.sin(th))) + 0.03; // a hair proud, so the cap covers the hole
+  };
+  // vertices: the back centre and ring (0.5 mm behind the middle, so the halves overlap), the cap centre and rings 1..K
+  const pos: number[] = [];
+  const push = (p: V3) => { pos.push(...p); return pos.length / 3 - 1; };
+  const backC = push(at(0, 0, -0.5));
+  const back: number[] = [];
+  for (let j = 0; j < N; j++) back.push(push(at(r, (j / N) * Math.PI * 2, -0.5)));
+  const capC = push(at(0, 0, cap(0, 0)));
+  const rings: number[][] = [];
+  for (let k = 1; k <= K; k++) { const ring: number[] = []; for (let j = 0; j < N; j++) ring.push(push(at((k / K) * r, (j / N) * Math.PI * 2, cap(k, j)))); rings.push(ring); }
+  const tri: number[] = [];
+  for (let j = 0; j < N; j++) {
+    const j2 = (j + 1) % N;
+    tri.push(backC, back[j2], back[j]); // back disc, facing -dir
+    tri.push(back[j], back[j2], rings[K - 1][j2], back[j], rings[K - 1][j2], rings[K - 1][j]); // wall
+    tri.push(capC, rings[0][j], rings[0][j2]); // cap centre fan, facing +dir
+    for (let k = 1; k < K; k++) tri.push(rings[k - 1][j], rings[k][j], rings[k][j2], rings[k - 1][j], rings[k][j2], rings[k - 1][j2]);
+  }
+  const m = { positions: Float32Array.from(pos), triangles: Uint32Array.from(tri) };
+  let plug = await toManifold(m);
+  if (plug.volume() < 0) plug = await toManifold({ positions: m.positions, triangles: Uint32Array.from(tri.map((_, i) => tri[i - (i % 3) + (2 - (i % 3))])) });
+  return { plug, rimLow: Math.min(...rim) - halfLength, rimHigh: Math.max(...rim) - halfLength, misses };
+}
+
+/** Distance along `d` from `o` to triangle `t` of the mesh (Möller–Trumbore), or -1. */
+function rayTriangle(o: V3, d: V3, mesh: { positions: Float32Array; triangles: Uint32Array }, t: number): number {
+  const P = (i: number): V3 => { const v = mesh.triangles[t + i] * 3; return [mesh.positions[v], mesh.positions[v + 1], mesh.positions[v + 2]]; };
+  const a = P(0), b = P(1), c = P(2);
+  const ab = sub(b, a), ac = sub(c, a);
+  const p = cross(d, ac);
+  const det = dot(ab, p);
+  if (Math.abs(det) < 1e-12) return -1;
+  const inv = 1 / det;
+  const s = sub(o, a);
+  const u = dot(s, p) * inv;
+  if (u < 0 || u > 1) return -1;
+  const q = cross(s, ab);
+  const v = dot(d, q) * inv;
+  if (v < 0 || u + v > 1) return -1;
+  return dot(ac, q) * inv;
+}
+const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a: V3): V3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 
 /** Re-tags every face of a manifold with one material run ID. */
 async function retag(m: ManifoldT, firstID: number, material: number): Promise<ManifoldT> {

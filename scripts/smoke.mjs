@@ -23,6 +23,13 @@ await page.goto(base);
 await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Goose loaded'), null, { timeout: 60000 });
 console.log('1.', await status());
 await page.screenshot({ path: join(out, '1-loaded.png') });
+// the layout: the page never scrolls, the canvas is exactly the view's size, and the side panels scroll on their own
+const layout = await page.evaluate(() => {
+  const view = document.getElementById('view'), canvas = view.querySelector('canvas[data-engine]'), panel = document.getElementById('panel');
+  return { page: document.scrollingElement.scrollHeight - innerHeight, view: view.scrollHeight - view.clientHeight, canvas: [canvas.clientWidth - view.clientWidth, canvas.clientHeight - view.clientHeight], panel: getComputedStyle(panel).overflowY };
+});
+console.log('1b. layout:', JSON.stringify(layout));
+if (layout.page > 0 || layout.view > 0 || layout.canvas.some((d) => Math.abs(d) > 1) || layout.panel !== 'auto') throw new Error('the view or the page scrolls');
 
 if (!process.env.SMOKE_FROM) { // SMOKE_FROM=8 skips to the picture, puck and neck steps
 // a puck accessory: 18 mm dia x 8 mm, built here so the test needs no fixture file
@@ -142,10 +149,10 @@ await download.saveAs(threemf);
 console.log('3e.', await status(), '→', threemf);
 await page.screenshot({ path: join(out, '3c-painted.png') });
 // focus view: the goose goes, the camera frames the part; off again and the goose is back
-await page.check('#paint-focus');
+await page.click('#focus');
 const hidden = await page.evaluate(() => window.__goose.gooseVisible);
 await page.screenshot({ path: join(out, '3f-focus.png') });
-await page.uncheck('#paint-focus');
+await page.click('#focus');
 const shown = await page.evaluate(() => window.__goose.gooseVisible);
 console.log('3f. focus hides the goose:', !hidden, '| back after:', shown);
 if (hidden || !shown) throw new Error('focus view did not toggle the goose');
@@ -193,7 +200,7 @@ await page.waitForFunction(() => document.getElementById('cloth-result').textCon
 await page.waitForFunction(() => !document.getElementById('wrap-garment').disabled, null, { timeout: 120000 });
 console.log('7b.', await status(), '|', await page.locator('#cloth-result').textContent());
 await page.screenshot({ path: join(out, '7b-wrapped.png') });
-const [clothDl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-cloth')]);
+const [clothDl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-fitted')]);
 console.log('7c. exported', clothDl.suggestedFilename());
 // a split, form-fitting shirt: two halves with magnet pockets, exported as two files (the controls sit in a closed details)
 await page.evaluate(() => { for (const d of document.querySelectorAll('#tab-clothing details')) d.open = true; });
@@ -204,8 +211,9 @@ await page.waitForFunction(() => document.getElementById('cloth-result').textCon
 console.log('7d.', await page.locator('#cloth-result').textContent());
 await page.screenshot({ path: join(out, '7d-split-shirt.png') });
 const halves = [];
+console.log('7d. export says:', await page.locator('#export-info').textContent());
 page.on('download', (d) => halves.push(d.suggestedFilename()));
-await page.click('#export-cloth');
+await page.click('#export-fitted');
 await page.waitForFunction(() => true, null, { timeout: 2000 }).catch(() => {});
 await new Promise((r) => setTimeout(r, 1500));
 console.log('7e. exported halves', halves.join(', '));
@@ -222,7 +230,7 @@ await page.screenshot({ path: join(out, '7f-cleared.png') });
 
 }
 
-// a picture: an SVG candy cane (red with white stripes) stands on the head, its puck under the bottom edge, facing the beak
+// a picture: an SVG candy cane (red with white stripes) stands on the head, its puck behind it resting on the head, facing the beak
 const cane = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 120"><rect x="20" y="20" width="20" height="100" fill="#d03b2f"/><path d="M20 30 A15 15 0 0 1 50 30 L50 50 L40 50 L40 30 A5 5 0 0 0 30 30 L30 40 L20 40 Z" fill="#d03b2f"/><rect x="20" y="50" width="20" height="12" fill="#ffffff"/><rect x="20" y="80" width="20" height="12" fill="#ffffff"/></svg>`;
 await page.click('.tabs button[data-tab="accessory"]');
 await page.evaluate(() => { const p = document.getElementById('point'); p.value = 'head'; p.dispatchEvent(new Event('change')); }); // the select is hidden until a model is loaded
@@ -232,35 +240,107 @@ const caneInfo = await page.locator('#model-info').textContent();
 const caneSpin = await page.evaluate(() => document.getElementById('spin').value);
 console.log('8.', caneInfo, '| spin', caneSpin);
 if (!/standing/.test(caneInfo) || !/2 colours/.test(caneInfo)) throw new Error('the picture did not build standing with two colours');
+if (!/behind it, standing on the goose/.test(caneInfo)) throw new Error('the picture on the head did not get its puck behind it');
+// the cane's hook (30 wide) is at the top and its stem (20 wide, with the 14 mm puck behind it) at the bottom: the SVG is the right way up
+const [hookW, footW] = await page.evaluate(() => { const b = window.__goose.accessoryBox; const top = b.max[2]; return [window.__goose.accessoryWidth(top - 10, top), window.__goose.accessoryWidth(b.min[2], b.min[2] + 2)]; });
+console.log('8a. width at the top', hookW.toFixed(1), '| at the foot', footW.toFixed(1));
+if (!(hookW > footW + 3)) throw new Error('the SVG picture is upside down');
+if (!(await page.evaluate(() => document.querySelector('#flat-preview svg path')))) throw new Error('the picture panel shows no preview');
 await page.click('#fit');
 await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
 console.log('8b.', await page.locator('#fit-result').textContent());
 await page.screenshot({ path: join(out, '8-cane-head.png') });
-// the accessory view: the goose goes; the magnet moves to a clicked spot on the picture (along its bottom edge, since it stands)
-await page.evaluate(() => { document.getElementById('review-details').open = true; });
-await page.check('#accessory-focus');
+// the accessory view: the goose goes; the magnet moves to a clicked spot on the picture (along its back, since it stands)
+await page.click('#focus');
 const caneHidden = await page.evaluate(() => window.__goose.gooseVisible);
 await page.screenshot({ path: join(out, '8c-accessory-view.png') });
 const mountBefore = await page.evaluate(() => window.__goose.mount);
 await page.click('#move-mount');
-const [mx, my] = await page.evaluate(() => window.__goose.modelOnScreen(4, -1.5, 20));
+const [mx, my] = await page.evaluate(() => { const b = window.__goose.accessoryBox; return window.__goose.modelOnScreen(4, b.min[1], 20); });
 await page.mouse.click(mx, my);
 await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Mount moved'), null, { timeout: 60000 });
 const mountAfter = await page.evaluate(() => window.__goose.mount);
 console.log('8c. goose hidden:', !caneHidden, '| mount', mountBefore.map((v) => v.toFixed(1)).join(','), '→', mountAfter.map((v) => v.toFixed(1)).join(','), '|', await status());
 if (caneHidden) throw new Error('the accessory view did not hide the goose');
 if (Math.abs(mountAfter[0] - mountBefore[0] - 4) > 1) throw new Error('the mount did not move to the clicked spot');
-await page.uncheck('#accessory-focus');
+await page.click('#focus');
 await page.evaluate(() => { if (window.__goose.moveMode) document.getElementById('move-mount').click(); });
-// a flat picture on the wing, puck behind it
+// the head keeps a tilt of its own
+await page.fill('#tilt-x', '10');
+await page.dispatchEvent('#tilt-x', 'input');
+// a flat picture on the wing, puck under its back: the wing starts from its own defaults, not the head's spin and tilt
 await page.selectOption('#point', 'left_wing');
 await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Picture built'), null, { timeout: 60000 });
-console.log('8d.', await page.locator('#model-info').textContent());
-if (!/flat/.test(await page.locator('#model-info').textContent())) throw new Error('the picture did not lie flat on the wing');
+const wingInfo = await page.locator('#model-info').textContent();
+const wingPlace = await page.evaluate(() => ['spin', 'tilt-x', 'flat-orientation', 'flat-attach'].map((id) => document.getElementById(id).value).concat([document.getElementById('flat-attach').disabled]));
+console.log('8d.', wingInfo, '| wing settings', wingPlace.join('/'));
+if (!/lying flat/.test(wingInfo) || !/under its back/.test(wingInfo)) throw new Error('the picture did not lie flat on the wing');
+if (wingPlace.join('/') !== '0/0/flat/back/true') throw new Error('the wing did not start from its own defaults');
 await page.click('#fit');
 await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
 console.log('8e.', await page.locator('#fit-result').textContent());
 await page.screenshot({ path: join(out, '8e-cane-wing.png') });
+// back to the head: its spin, tilt and moved mount come back
+await page.selectOption('#point', 'head');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Picture built'), null, { timeout: 60000 });
+const headBack = await page.evaluate(() => [document.getElementById('spin').value, document.getElementById('tilt-x').value, window.__goose.mount]);
+console.log('8f. head again: spin', headBack[0], 'tilt', headBack[1], 'mount', headBack[2].map((v) => v.toFixed(1)).join(','));
+if (headBack[0] !== caneSpin || headBack[1] !== '10' || Math.abs(headBack[2][0] - mountAfter[0]) > 0.01) throw new Error('the head did not keep its own placement');
+// the mount choices: lying flat allows only the back; standing on its bottom edge puts the puck under it
+await page.selectOption('#flat-orientation', 'flat');
+await page.waitForFunction(() => document.getElementById('model-info').textContent.includes('lying flat'), null, { timeout: 60000 });
+const flatAttach = await page.evaluate(() => [document.getElementById('flat-attach').value, document.getElementById('flat-attach').disabled, document.getElementById('spin').value]);
+await page.selectOption('#flat-orientation', 'standing');
+await page.waitForFunction(() => document.getElementById('model-info').textContent.includes('standing up'), null, { timeout: 60000 });
+await page.selectOption('#flat-attach', 'bottom');
+await page.waitForFunction(() => document.getElementById('model-info').textContent.includes('under its bottom edge'), null, { timeout: 60000 });
+console.log('8g. flat:', flatAttach.join('/'), '| standing on its edge:', await page.locator('#model-info').textContent(), '|', await page.locator('#flat-mount-hint').textContent());
+if (flatAttach[0] !== 'back' || !flatAttach[1] || flatAttach[2] !== '0') throw new Error('lying flat did not limit the puck to the back');
+await page.selectOption('#flat-attach', 'back');
+await page.waitForFunction(() => document.getElementById('model-info').textContent.includes('behind it'), null, { timeout: 60000 });
+await page.fill('#tilt-x', '0');
+await page.dispatchEvent('#tilt-x', 'input');
+
+// a raster picture goes through Prepare image: drop the background, keep two colours, use it; Adjust opens it again
+const png = await page.evaluate(async () => {
+  const c = document.createElement('canvas');
+  c.width = 160; c.height = 160;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 160, 160);
+  g.fillStyle = '#d03b2f';
+  g.beginPath(); g.moveTo(80, 140); g.bezierCurveTo(10, 90, 20, 20, 80, 50); g.bezierCurveTo(140, 20, 150, 90, 80, 140); g.fill();
+  g.fillStyle = '#222222'; g.beginPath(); g.arc(80, 80, 14, 0, Math.PI * 2); g.fill();
+  const b = await new Promise((r) => c.toBlob(r, 'image/png'));
+  return Array.from(new Uint8Array(await b.arrayBuffer()));
+});
+await page.setInputFiles('#flat-file', { name: 'heart.png', mimeType: 'image/png', buffer: Buffer.from(png) });
+await page.waitForSelector('#prepare-image[open]', { timeout: 30000 });
+await page.fill('#prep-colours', '2');
+await page.dispatchEvent('#prep-colours', 'input');
+await page.waitForFunction(() => /2 of 2 colours kept/.test(document.getElementById('prep-status').textContent), null, { timeout: 10000 });
+await page.screenshot({ path: join(out, '8h-prepare-image.png') });
+const chips = await page.locator('#prep-chips .chip').count();
+await page.click('#prep-use');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Picture built'), null, { timeout: 60000 });
+const heartInfo = await page.locator('#model-info').textContent();
+console.log('8h. dialog chips', chips, '|', await page.locator('#flat-info').textContent(), '|', heartInfo);
+if (chips !== 2 || !/2 colours/.test(heartInfo) || !/behind it/.test(heartInfo)) throw new Error('the prepared picture did not build with two colours and its puck behind');
+if (await page.evaluate(() => document.getElementById('flat-adjust').disabled)) throw new Error('Adjust is not available for a picture');
+await page.click('#flat-adjust');
+await page.waitForSelector('#prepare-image[open]', { timeout: 10000 });
+const keptSetting = await page.evaluate(() => document.getElementById('prep-colours').value);
+await page.click('#prep-cancel');
+if (keptSetting !== '2') throw new Error('Adjust did not reopen with the settings used');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('8i. heart on the head:', await page.locator('#fit-result').textContent());
+if (/floor/.test(await page.locator('#fit-result').textContent())) throw new Error('the heart puck has no floor under its pocket');
+await page.screenshot({ path: join(out, '8i-heart-head.png') });
+await page.click('#view-front');
+await page.screenshot({ path: join(out, '8j-heart-front.png') });
+await page.click('#view-side');
+await page.screenshot({ path: join(out, '8k-heart-side.png') });
+await page.click('#view-iso');
 
 // a small model: a thin sword gets a puck under its guard, and can then be fitted
 const sword = boxesStl([[0, 0, 0, 40, 5, 2], [10, -4.5, 0, 4, 14, 2]]);
@@ -281,6 +361,16 @@ await page.waitForFunction(() => document.getElementById('fit-result').textConte
 console.log('9c.', await page.locator('#fit-result').textContent());
 if (/floor/.test(await page.locator('#fit-result').textContent())) throw new Error('the puck did not give the pocket a floor');
 await page.screenshot({ path: join(out, '9-sword-puck.png') });
+// the puck behind the sword instead: it stands just in front of the puck, turned to face the beak
+await page.selectOption('#prep-puck-attach', 'behind');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Puck added behind'), null, { timeout: 60000 });
+console.log('9d.', await page.locator('#puck-info').textContent(), '| spin', await page.evaluate(() => document.getElementById('spin').value));
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('9e.', await page.locator('#fit-result').textContent());
+if (/floor/.test(await page.locator('#fit-result').textContent())) throw new Error('the puck behind did not give the pocket a floor');
+await page.screenshot({ path: join(out, '9e-sword-behind.png') });
+await page.selectOption('#prep-puck-attach', 'under');
 
 // the neck: a band appears, a bow-tie block is fitted on it with slots, and the export gives the band as its own part
 const bow = boxesStl([[-12, -4, 0, 24, 8, 4]]);
@@ -293,8 +383,9 @@ console.log('10. band:', JSON.stringify(bandInfo), '|', await page.locator('#nec
 if (bandInfo.tabs !== 2 || bandInfo.volume < 50) throw new Error('the neck band is not right');
 await page.click('#fit');
 await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
-console.log('10b.', await page.locator('#fit-result').textContent());
+console.log('10b.', await page.locator('#fit-result').textContent(), '|', await page.locator('#neck-info').textContent());
 if (!/separate part/.test(await page.locator('#fit-result').textContent())) throw new Error('the fit on the neck did not keep the band');
+if (!/Fitted with 2\.0 mm tabs/.test(await page.locator('#neck-info').textContent())) throw new Error('the bow did not take full-length tabs');
 await page.screenshot({ path: join(out, '10-neck-bow.png') });
 const neckFiles = [];
 page.on('download', (d) => neckFiles.push(d.suggestedFilename()));
@@ -307,9 +398,12 @@ const [neckDl] = await Promise.all([page.waitForEvent('download', { timeout: 300
 console.log('10d.', await status(), '→', neckDl.suggestedFilename());
 await page.click('.tabs button[data-tab="accessory"]');
 await page.selectOption('#point', 'head');
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Place it'), null, { timeout: 60000 }); // the bow is prepared again for the head
 
-// magnet hole: click the middle of the view, which lands on the goose body
+// magnet hole: from the opening camera, the middle of the view lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
+await page.evaluate(() => window.__goose.lookAt([115, 140, 90], [-180, -260, 220]));
+await page.screenshot({ path: join(out, '4a-hole-view.png') });
 const box = await page.locator('#view canvas[data-engine]').boundingBox();
 await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
 await page.waitForFunction(() => document.getElementById('pick').textContent.startsWith('Picked'), null, { timeout: 5000 });

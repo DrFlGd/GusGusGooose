@@ -7,32 +7,32 @@
   <link rel="stylesheet" href="/src/web/style.css" />
 </head>
 <body>
-  <div id="app">
-    <aside id="panel">
-      <header class="brand">
-        <h1>Gus Gus Goose</h1>
-        <span class="muted small">fit, dress and paint the desk goose</span>
-      </header>
-      <p id="status" class="status">Loading goose…</p>
-
-      <nav class="tabs">
+  <div id="app" class="app">
+    <header class="top">
+      <div class="title"><h1>Gus Gus Goose</h1><span class="subtitle">fit, dress and paint the desk goose</span></div>
+      <nav class="tabs segmented" aria-label="Mode">
         <button data-tab="accessory" class="active">Accessory</button>
         <button data-tab="clothing">Clothing</button>
         <button data-tab="paint" id="paint-tab-button" disabled title="Fit an accessory or make a garment first">Paint</button>
         <button data-tab="hole">Hole</button>
       </nav>
-
+      <div class="top-actions">
+        <button id="theme" class="icon" title="Light or dark" aria-label="Light or dark"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor" /></svg></button>
+      </div>
+    </header>
+    <main class="main">
+    <aside id="panel" class="side left" aria-label="Settings">
       <!-- ============ Accessory ============ -->
       <section id="tab-accessory" class="tab">
         <div class="step">
           <h2><span class="n">1</span>Load a model</h2>
           <label class="file">
             <input type="file" id="accessory-file" accept=".stl,.obj,.3mf" />
-            <span><b>Choose a file</b> or drop it on the view<br /><span class="muted">STL, OBJ or 3MF from Printables, MakerWorld…</span></span>
+            <span><b>Choose a model</b> or drop it on the view<br /><span class="muted">STL, OBJ or 3MF from Printables, MakerWorld…</span></span>
           </label>
           <p id="model-info" class="small muted"></p>
           <div class="row">
-            <button id="clear-model" disabled title="Nothing loaded">Clear model</button>
+            <button id="clear-model" disabled title="Nothing loaded">Clear</button>
           </div>
           <details>
             <summary>Import repair</summary>
@@ -61,16 +61,19 @@
               <span>Add a decoration STL on top of the base</span>
             </label>
           </details>
-          <details id="flat-panel">
-            <summary>Or make a flat accessory from a picture</summary>
-            <label class="file small">
-              <input type="file" id="flat-file" accept="image/*,.svg" />
-              <span><b>Choose a picture or SVG</b> or drop it on the view<br /><span class="muted">a candy cane, a heart, a holiday ornament…</span></span>
-            </label>
-            <p id="flat-info" class="small muted"></p>
-            <p class="small muted">The outline becomes a plate, each colour an inlay on its face, and the magnet goes in a puck behind it: flat on a wing, or standing on its bottom edge on the head. Vector files keep their fills; pictures are reduced to a few colours.</p>
-            <div class="field"><span>Colours to keep (pictures)</span><span class="val"><input type="number" id="flat-colors" step="1" min="1" max="8" value="3" /></span></div>
-            <label class="check"><input type="checkbox" id="flat-background" checked /> Drop the background (the colour round the edge)</label>
+        </div>
+
+        <div id="flat-panel" class="step">
+          <h2><span class="n">1</span>Or a picture</h2>
+          <div id="flat-preview" class="image-preview checker"><div class="image-empty">Drop a picture here<br /><span class="muted small">PNG, JPG, WebP or SVG. Clip art and flat artwork work best.</span></div></div>
+          <p id="flat-info" class="small muted">A candy cane, a heart, a holiday ornament: the outline becomes a plate and each colour an inlay.</p>
+          <div class="row">
+            <label class="btn primary file-btn"><input type="file" id="flat-file" accept="image/*,.svg" />Choose picture…</label>
+            <button id="flat-adjust" disabled title="Background, colours, cleanup and exposure">Adjust…</button>
+            <button id="flat-remove" disabled>Remove</button>
+          </div>
+          <details id="flat-shape">
+            <summary>Size and colours</summary>
             <div class="field"><span>Width</span><span class="val"><input type="number" id="flat-width" step="0.5" min="5" value="30" /><span class="unit">mm</span></span></div>
             <div class="field"><span>Thickness</span><span class="val"><input type="number" id="flat-depth" step="0.5" min="1" value="3" /><span class="unit">mm</span></span></div>
             <div class="field"><span>Colour inlay depth</span><span class="val"><input type="number" id="flat-inlay" step="0.1" min="0" value="0.6" /><span class="unit">mm</span></span></div>
@@ -82,22 +85,7 @@
             </div>
             <div class="field"><span>Outline margin</span><span class="val"><input type="number" id="flat-margin" step="0.5" min="0" value="0" /><span class="unit">mm</span></span></div>
             <label class="check"><input type="checkbox" id="flat-fill-holes" /> Fill holes in the outline</label>
-            <div class="field"><span>Stands</span>
-              <select id="flat-orientation">
-                <option value="auto">as the point suits: up on the head, flat elsewhere</option>
-                <option value="flat">flat on the goose</option>
-                <option value="standing">up on its bottom edge</option>
-              </select>
-            </div>
-            <div class="field"><span>Magnet</span>
-              <select id="flat-mount">
-                <option value="puck">in a puck behind it</option>
-                <option value="plate">in the plate itself</option>
-                <option value="none">none: glued, or held by the neck band</option>
-              </select>
-            </div>
-            <div class="field"><span>Puck</span><span class="val"><input type="number" id="flat-puck-d" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="flat-puck-h" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
-            <p class="small muted">Auto sizes the puck to the magnet point. It goes under the deepest part of the picture, or under the bottom edge when it stands; move it in the accessory view below.</p>
+            <p class="small muted">Vector files keep their fills; pictures are traced with the settings under Adjust. A margin grows the outline in the base colour and joins loose pieces.</p>
           </details>
         </div>
 
@@ -129,24 +117,12 @@
             <div class="field"><span>Or a plain plug</span><span class="val"><input type="number" id="prep-plug-d" step="0.5" value="0" /><span class="unit">dia</span><input type="number" id="prep-plug-h" step="0.5" value="8" /><span class="unit">high</span></span></div>
             <p class="muted small">A solid cylinder from the base up into the model, for models with no enclosed cavity to fill.</p>
           </details>
-          <details id="puck-details">
-            <summary>Small models: a puck for the magnet</summary>
-            <div class="field"><span>Puck under the model</span>
-              <select id="prep-puck">
-                <option value="auto">when it cannot hold the magnet itself</option>
-                <option value="always">always</option>
-                <option value="never">never</option>
-              </select>
-            </div>
-            <div class="field"><span>Size</span><span class="val"><input type="number" id="prep-puck-d" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="prep-puck-h" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
-            <p class="muted small">A cylinder let into the underside at the deepest point of the model's outline (a sword's guard), which takes the magnet pocket and becomes the base. Auto sizes it to the magnet point. Move it in the accessory view below.</p>
-            <p id="puck-info" class="small"></p>
-          </details>
         </div>
 
         <div id="accessory-controls" class="step hidden">
           <h2><span class="n">3</span>Place</h2>
-          <div class="field"><span>Magnet point</span><select id="point"></select></div>
+          <div class="field"><span>Position</span><select id="point"></select></div>
+          <p class="small muted">Each position keeps its own placement and mount; a new model starts them all afresh.</p>
           <div id="neck-panel" class="hidden">
             <p class="small muted">A press-fit band clips round the neck from the front. The accessory sits on the band's front, carved against the goose and the band, and the band prints as its own part. Sink and the rings still apply.</p>
             <div class="slider">
@@ -169,6 +145,51 @@
             <div class="field" id="neck-tab-row"><span>Tabs</span><span class="val"><input type="number" id="neck-tab-d" step="0.5" min="1" value="3" /><span class="unit">dia</span><input type="number" id="neck-tab-l" step="0.5" min="1" value="2" /><span class="unit">long</span><input type="number" id="neck-tab-s" step="1" min="0" value="10" /><span class="unit">apart</span></span></div>
             <p id="neck-info" class="small muted"></p>
           </div>
+          <details id="mount-details" open>
+            <summary>Magnet mount</summary>
+            <div id="flat-mount-controls" class="hidden">
+              <div class="field"><span>Magnet</span>
+                <select id="flat-mount">
+                  <option value="puck">in a puck</option>
+                  <option value="plate">in the picture itself</option>
+                  <option value="none">none: glued, or on the neck band</option>
+                </select>
+              </div>
+              <div class="field"><span>Puck to the picture</span>
+                <select id="flat-orientation">
+                  <option value="flat">parallel: the picture lies on the goose</option>
+                  <option value="standing">perpendicular: the picture stands up</option>
+                </select>
+              </div>
+              <div class="field"><span>Puck joins</span>
+                <select id="flat-attach">
+                  <option value="back">the back</option>
+                  <option value="bottom">the bottom edge</option>
+                </select>
+              </div>
+              <div class="field"><span>Puck size</span><span class="val"><input type="number" id="flat-puck-d" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="flat-puck-h" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
+              <p id="flat-mount-hint" class="small muted"></p>
+            </div>
+            <div id="puck-controls">
+              <div class="field"><span>Puck for the magnet</span>
+                <select id="prep-puck">
+                  <option value="auto">when the model cannot hold it</option>
+                  <option value="always">always</option>
+                  <option value="never">never</option>
+                </select>
+              </div>
+              <div class="field"><span>Puck joins</span>
+                <select id="prep-puck-attach">
+                  <option value="under">the underside: the model sits on it</option>
+                  <option value="behind">the back: the model stands just in front</option>
+                </select>
+              </div>
+              <div class="field"><span>Puck size</span><span class="val"><input type="number" id="prep-puck-d" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="prep-puck-h" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
+              <p id="puck-info" class="small"></p>
+            </div>
+            <div class="row"><button id="move-mount" disabled>Move the magnet: click the model</button></div>
+            <p id="mount-info" class="small muted">Auto sizes the puck to the magnet and the sink. Click Move, then the model where the magnet should be; Hide goose over the view shows the model on its own.</p>
+          </details>
           <div class="slider">
             <div class="slider-head"><span>Sink into the goose</span><span class="val"><input type="number" id="sink-num" step="0.5" min="0" max="15" /><span class="unit">mm</span></span></div>
             <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
@@ -194,12 +215,6 @@
             <div class="slider-head"><span>Slide Y</span><span class="val"><input type="number" id="dy-num" step="0.5" min="-30" max="30" /><span class="unit">mm</span></span></div>
             <input type="range" id="dy" min="-30" max="30" step="0.5" value="0" />
           </div>
-          <details id="review-details">
-            <summary>Accessory view: review it, move the magnet</summary>
-            <label class="check"><input type="checkbox" id="accessory-focus" /> Hide the goose and frame the model</label>
-            <div class="row"><button id="move-mount">Move the magnet: click the model</button></div>
-            <p id="mount-info" class="small muted">The magnet pocket is cut where the model's origin meets the goose. With this on, a click on the model puts the magnet there: a puck moves under the spot, a picture's mount moves to it, a plain model slides so the spot is over the magnet.</p>
-          </details>
           <details id="pocket-details">
             <summary>Pocket and clearance</summary>
             <div class="field"><span>Magnet</span>
@@ -233,10 +248,8 @@
           </details>
           <div class="actions">
             <button id="fit" class="primary">Fit to the goose</button>
-            <button id="export-fitted" disabled>Export STL</button>
           </div>
           <p id="fit-result" class="small"></p>
-          <p class="small muted">Then paint it on the Paint tab.</p>
         </div>
       </section>
 
@@ -359,10 +372,7 @@
             <button id="wrap-garment" disabled title="Load a garment model first">Wrap loaded model</button>
           </div>
           <p id="cloth-result" class="small"></p>
-          <div class="row">
-            <button id="export-cloth" disabled>Export STL</button>
-          </div>
-          <p class="muted small">Paint it on the Paint tab and export a 3MF there.</p>
+          <p class="muted small">Export it on the right, or paint it on the Paint tab first.</p>
         </div>
       </section>
 
@@ -437,25 +447,9 @@
           <div class="field"><span>Refine: split edges longer than</span><span class="val"><input type="number" id="refine-len" step="0.25" value="1" /><span class="unit">mm</span></span></div>
           <div class="row"><button id="refine">Refine mesh</button></div>
           <p id="paint-info" class="small muted"></p>
-          <label class="check"><input type="checkbox" id="paint-focus" /> Hide the goose and frame the part</label>
+          <p class="small muted">Hide goose over the view shows the part on its own, to paint all round it.</p>
         </div>
 
-        <div class="step">
-          <h2>Export</h2>
-          <div class="actions">
-            <button id="export-3mf" class="primary">Export 3MF</button>
-            <button id="export-fitted-2">Export STL</button>
-          </div>
-          <details id="split-details">
-            <summary>Split by colour</summary>
-            <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one with the most faces).</p>
-            <div class="field"><span>Skin depth</span><span class="val"><input type="number" id="split-depth" step="0.2" min="0.4" value="1.2" /><span class="unit">mm</span></span></div>
-            <div class="row">
-              <button id="export-split">Export 3MF with one part per colour</button>
-            </div>
-            <p id="split-info" class="small muted"></p>
-          </details>
-        </div>
       </section>
 
       <!-- ============ Magnet hole ============ -->
@@ -491,17 +485,49 @@
         </div>
       </section>
 
-      <section class="points">
-        <h2>Magnet points</h2>
+    </aside>
+    <section id="view" class="stage" aria-label="Preview">
+      <canvas id="overlay"></canvas>
+      <div class="stage-tools">
+        <div class="tool-group">
+          <button id="view-iso" class="icon" title="Iso view">Iso</button>
+          <button id="view-front" class="icon" title="From the front">Front</button>
+          <button id="view-side" class="icon" title="From the side">Side</button>
+          <button id="view-top" class="icon" title="From above">Top</button>
+          <button id="view-fit" class="icon" title="Frame the part">Fit</button>
+          <span class="sep"></span>
+          <button id="focus" class="icon" title="Hide the goose and frame the part" aria-pressed="false">Hide goose</button>
+        </div>
+      </div>
+      <p id="status" class="status">Loading goose…</p>
+    </section>
+    <aside class="side right" aria-label="Export">
+      <section class="group-static">
+        <h2 class="panel-title">Export</h2>
+        <div class="export">
+          <button id="export-3mf" class="primary export-btn" disabled><span>3MF with colours</span><small>Painted regions map to filaments in Bambu Studio, PrusaSlicer, OrcaSlicer</small></button>
+          <button id="export-fitted" class="export-btn" disabled><span>STL</span><small>One colour; split garments give one file per half</small></button>
+        </div>
+        <p id="export-info" class="small muted">Fit an accessory or make a garment to export it.</p>
+        <details id="split-details">
+          <summary>Split by colour</summary>
+          <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one with the most faces).</p>
+          <div class="field"><span>Skin depth</span><span class="val"><input type="number" id="split-depth" step="0.2" min="0.4" value="1.2" /><span class="unit">mm</span></span></div>
+          <div class="row">
+            <button id="export-split" disabled>Export one part per colour</button>
+          </div>
+          <p id="split-info" class="small muted"></p>
+        </details>
+      </section>
+      <section class="group-static points">
+        <h2 class="panel-title">Positions</h2>
         <ul id="points"></ul>
       </section>
-      <section id="goose-colours-section" class="hidden">
-        <h2>Goose colours</h2>
+      <section id="goose-colours-section" class="group-static hidden">
+        <h2 class="panel-title">Goose colours</h2>
         <div id="goose-colours"></div>
       </section>
     </aside>
-    <main id="view">
-      <canvas id="overlay"></canvas>
     </main>
   </div>
   <script type="module" src="/src/web/main.ts"></script>

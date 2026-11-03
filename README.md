@@ -9,8 +9,12 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 
 ## App
 
-`npm run dev` opens the browser app (Vite). It shows the goose in its
-filament colours with its magnet points. Load a downloaded model (STL, OBJ
+`npm run dev` opens the browser app (Vite). Its layout is Print Factory's:
+the settings on the left, the view in the middle with buttons for iso,
+front, side and top views, Fit and Hide goose, and Export on the right
+(3MF with colours, STL, split by colour). Each side scrolls on its own and
+the view never scrolls; a button in the top bar switches between light and
+dark. It shows the goose in its filament colours with its magnet points. Load a downloaded model (STL, OBJ
 or 3MF, or drop the file on the view), prepare it (which side meets the
 goose, a width to scale it to, a plug of solid material for hollow models),
 place it on a point with sink, spin and slide controls, Fit with one click
@@ -45,8 +49,8 @@ part's filament slot, paint applied in Bambu Studio or PrusaSlicer (a
 triangle painted in more than one colour takes the colour covering most of
 it), and standard 3MF material groups, including the app's own exports.
 They become the palette, ride through fit and wrap as material tags on the
-solid, and come out on the export. A tick box hides the goose and frames
-the part so you can paint all round it, and Split by colour exports one
+solid, and come out on the export. Hide goose over the view frames the part on
+its own so you can paint all round it, and Split by colour exports one
 body per colour in a single 3MF (each colour a skin of the chosen depth
 under its faces, the rest with the base colour) for slicers that want
 parts rather than paint. Everything runs in the page; nothing is uploaded.
@@ -55,10 +59,13 @@ shells, holes) are rebuilt on a voxel grid on import, at a pitch chosen
 from their size or one you set (down to 0.3 mm for more detail, at the
 cost of a longer wait); the Clear buttons on the Accessory and Clothing
 tabs drop the loaded model and anything fitted, to start over.
-`npm run smoke` builds it and drives it headlessly (fit a puck, import a
-3MF, make a shirt, wrap it, clear, build a picture on the head and a wing
-and move its mount, puck a sword, fit a bow on the neck band, cut a hole;
-screenshots in `smoke-out/`); it needs Playwright with Chromium available.
+`npm run smoke` builds it and drives it headlessly (check the view and the
+page do not scroll, fit a puck, import a 3MF, make a shirt, wrap it, clear,
+build an SVG picture on the head and a wing and move its mount, check each
+position keeps its own placement, switch the mount layouts, prepare a PNG
+in the Prepare image dialog, puck a sword under and behind, fit a bow on
+the neck band, cut a hole; screenshots in `smoke-out/`); it needs
+Playwright with Chromium available.
 
 On the Accessory tab, a hollow model (a hat open underneath) can be filled
 before the fit: the fill finds the cavity the walls enclose above the magnet
@@ -70,17 +77,28 @@ rotation rings (two tilts and the spin about the magnet axis) to drag, with
 sliders in the panel for fine adjustment; the fit uses the same angles.
 
 A picture makes an accessory too: drop a PNG, JPG or SVG on the view (or
-choose it under "make a flat accessory from a picture"). The picture is
-traced (an SVG keeps its fills; a photo is reduced to a few colours with
-the background dropped), its outline becomes a plate of the thickness you
-set, and each colour an inlay let into the face (or both faces), so a
-candy cane prints red with white stripes. The magnet goes in a puck behind
-the plate, or in the plate itself, sized to the point's magnet; on the head
-the picture stands up on its bottom edge with the puck under it, facing
-the beak, and on a wing or the beak it lies flat with the puck under the
-deepest point of the outline. A margin grows the outline and joins loose
-pieces; holes can be filled. The tracing and SVG code is vendored from the
-Print Factory project (MIT, `src/vendor/`).
+choose it under "Or a picture"). A PNG, JPG or WebP opens Print Factory's
+Prepare image dialog, with the original and the result side by side:
+remove the background (and its tolerance), the number of colours, a chip
+per colour to keep or drop it, one colour only for a silhouette, smoothing,
+speck removal, exposure, contrast and saturation; Ctrl + scroll zooms.
+"Use this image" traces exactly what the result shows, and Adjust opens it
+again with the same settings. An SVG keeps its own fills. The traced
+picture shows in the panel; its outline becomes a plate of the thickness
+you set, and each colour an inlay let into the face (or both faces), so a
+candy cane prints red with white stripes. The palette is learned from flat
+areas only, so the blend along a smooth edge never takes a colour of its
+own. The magnet goes in a puck, or in the plate itself, sized to the
+point's magnet, and each position chooses how: the puck parallel to the
+picture (the picture lies on the goose, puck under its back) or
+perpendicular (the picture stands up), and for a standing picture whether
+the puck joins its back (the puck rests on the goose and the picture stands
+just in front of it) or its bottom edge (the picture stands on the puck).
+The head starts standing with the puck behind, facing the beak; a wing or
+the beak starts lying flat with the puck under the deepest point of the
+outline. A margin grows the outline and joins loose pieces; holes can be
+filled. The tracing and SVG code is vendored from the Print Factory
+project (MIT, `src/vendor/`).
 
 The neck is a fourth place to wear things, with no magnet: choosing it
 builds a press-fit band (a C that clips round the neck from the front,
@@ -88,19 +106,28 @@ with an opening at the back you can widen or narrow, at a height you set)
 and shows it on the goose. The accessory, a bow tie, a scarf knot, a
 picture, sits on the band's front and is carved against the goose and
 the band together; two tabs on the band go into slots cut in its back
-(or leave it flat for glue). The band stays its own part: Export STL gives
-both files, and the Paint tab's 3MF carries the band as a second part.
+(or leave it flat for glue). The slots are blind: each stops 0.8 mm short
+of the accessory's front, and when the accessory is too thin for the tabs
+asked for, the tabs are shortened to suit (or left off, with a note to glue
+it). The fitted band, with its tabs at the length used, is shown on the
+neck and stays its own part: Export STL gives both files, and the 3MF
+carries the band as a second part.
 
-The accessory view (under Place) hides the goose and frames the model,
-fitted or not, to look it over, and "Move the magnet" puts the magnet
-where you click: a puck moves under the spot, a picture's mount moves to
-it, and a plain model slides so the spot sits over the magnet. Small
-models that cannot hold the magnet themselves (a sword, a 2 mm blade) get
-a puck under them in Prepare, let into the underside at the deepest point
-of the model's outline (the guard) and sized to the magnet point (its
-height leaves a floor under the pocket, which starts a sink above the
-base); it is on when the model has no room for the pocket, and can be
-forced on or off.
+Each position keeps its own placement and mount (sink, spin, tilts,
+slides, the puck's layout and size, a moved magnet), so moving to another
+position starts it from that position's defaults and coming back restores
+what was set there; loading a new model starts every position afresh.
+Hide goose frames the model, fitted or not, to look it over, and "Move the
+magnet" puts the magnet where you click: a puck moves under the spot, a
+picture's mount moves to it, and a plain model slides so the spot sits over
+the magnet. Small models that cannot hold the magnet themselves (a sword, a
+2 mm blade) get a puck in Prepare, sized to the magnet point (its height
+leaves a floor under the pocket, which starts a sink above the base). The
+puck joins the model's underside (the model sits on it, the puck let in at
+the deepest point of its outline, the guard) or its back (the model stands
+just in front of the puck, which rests on the goose, and on the head it
+turns to face the beak). It is on when the model has no room for the
+pocket, and can be forced on or off.
 
 Accessories are downloaded models, never built from primitives; see
 [accessories/README.md](accessories/README.md) for the library layout.
@@ -115,7 +142,7 @@ goose is in `goose/goose.3mf` (Bambu Studio project, v1.2.3 blank, full
 colour assembly) and `goose/goose-voids.3mf` (the bare white body and nose
 with the magnet voids as Bambu negative parts). `goose/goose.stl` is built
 from both: body, beak, feet, base disc, minus the leg pin holes and the
-magnet voids mapped across from the second file, plus the eyes (63,954
+magnet voids mapped across from the second file, plus the eyes (65,300
 triangles, 100 x 131 x 183 mm). `goose/profile.json` holds the four magnet points read
 straight from those negative parts: head 10.2 dia x 4.2 disc, wings
 10.2 x 10.2 x 4.2 blocks, beak 8 dia x 4.2 disc with its insertion slot.
@@ -124,9 +151,12 @@ the centre of each void's outer face projected to the surface. The eyes are
 printed separately (`black.stl` in the voids project, loose on the plate)
 and sit flush in a 3.5 mm pin channel through the head: the build finds
 that channel (a round hole open at both ends) and plugs it in the eye
-colour, just past each mouth, so every boolean sees a closed head with two
-black discs flush with its sides and a hat over the eyes is carved to the
-head instead of leaving plugs into the holes. `goose/goose-colors.json`
+colour, capped to the head's own surface at each mouth: the channel meets
+the slanted head 2 to 3 mm higher on one side of its rim than the other,
+so the build measures the rim all round with rays and shapes each cap to
+it. Every boolean sees a closed head with two black eyes flush with its
+sides, and a hat over the eyes is carved to the head instead of leaving
+plugs into the holes. `goose/goose-colors.json`
 carries each triangle's filament (orange beak, feet and nose; white body;
 the base disc; black eyes) from the project file, for the viewer only.
 

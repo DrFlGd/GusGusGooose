@@ -10,9 +10,10 @@ import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagge
 import { loadModel } from '../load-model.ts';
 import { DEFAULT_PREPARE, holdsMagnet, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
 import { buildFlat, DEFAULT_FLAT, svgDesign, type FlatDesign, type FlatOptions } from '../flat.ts';
-import { decodeImage, traceImage } from '../vendor/trace.ts';
+import { decodeImage, type Raster } from '../vendor/trace.ts';
 import { parseSvg } from '../vendor/svg.ts';
-import { DEFAULT_NECK, fitOnNeck, makeNeckBand, type NeckBand, type NeckOptions } from '../neck.ts';
+import { prepareImage, tracedPreview, type ImageSettings } from './prepare-image.ts';
+import { DEFAULT_NECK, fitOnNeck, makeNeckBand, SLOT_SKIN, type NeckBand, type NeckOptions } from '../neck.ts';
 import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, type Cavity, type GarmentOptions, type WrapOptions } from '../clothing.ts';
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
@@ -30,6 +31,8 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 /** Every range input with an `<id>-num` number box: the two follow each other, and a typed value fires the range's input handlers. */
 function pairSliders() {
   for (const range of document.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
+    fillRange(range);
+    range.addEventListener('input', () => fillRange(range));
     const num = document.getElementById(`${range.id}-num`) as HTMLInputElement | null;
     if (!num) continue;
     num.value = range.value;
@@ -38,14 +41,22 @@ function pairSliders() {
       const v = Math.max(Number(range.min), Math.min(Number(range.max), Number(num.value) || 0));
       range.value = String(v);
       num.value = String(v);
+      fillRange(range);
       range.dispatchEvent(new Event('input', { bubbles: true }));
     });
   }
 }
-/** Copies a range's value into its number box after the range was set from code. */
+/** The coloured part of a range's track, up to its value. */
+function fillRange(r: HTMLInputElement) {
+  const min = Number(r.min) || 0, max = Number(r.max) || 100;
+  r.style.setProperty('--fill', `${((Number(r.value) - min) / (max - min || 1)) * 100}%`);
+}
+/** Copies a range's value into its number box (and its track) after the range was set from code. */
 function syncSlider(id: string) {
+  const range = $<HTMLInputElement>(id);
+  fillRange(range);
   const num = document.getElementById(`${id}-num`) as HTMLInputElement | null;
-  if (num) num.value = $<HTMLInputElement>(id).value;
+  if (num) num.value = range.value;
 }
 pairSliders();
 
@@ -53,9 +64,8 @@ pairSliders();
 const view = $('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-view.appendChild(renderer.domElement);
+view.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1b1d22);
 const camera = new THREE.PerspectiveCamera(40, 1, 1, 2000);
 camera.up.set(0, 0, 1);
 camera.position.set(-180, -260, 220);
@@ -68,18 +78,41 @@ scene.add(key);
 const fill = new THREE.DirectionalLight(0xffffff, 0.5);
 fill.position.set(2, 1, -1);
 scene.add(fill);
-const grid = new THREE.GridHelper(300, 30, 0x3a3e47, 0x2a2d34);
-grid.rotation.x = Math.PI / 2;
-grid.position.set(115, 128, 0);
-scene.add(grid);
+let grid = new THREE.GridHelper(300, 30);
 
+// ---------- theme: light or dark, as the system says until chosen, and remembered ----------
+const THEME_KEY = 'gusgus.theme';
+function storedTheme(): string | null { try { return localStorage.getItem(THEME_KEY); } catch { return null; } }
+function applyTheme(theme: 'light' | 'dark') {
+  document.documentElement.dataset.theme = theme;
+  const css = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  scene.background = new THREE.Color(token('--bg', theme === 'dark' ? '#0f1114' : '#f6f7f9'));
+  const visible = grid.visible;
+  scene.remove(grid);
+  grid.geometry.dispose();
+  grid = new THREE.GridHelper(300, 30, new THREE.Color(token('--line-strong', '#cdd2d9')), new THREE.Color(token('--line', '#e2e5ea')));
+  grid.rotation.x = Math.PI / 2;
+  grid.position.set(115, 128, 0);
+  grid.visible = visible;
+  scene.add(grid);
+  $('theme').title = theme === 'dark' ? 'Dark; click for light' : 'Light; click for dark';
+}
+applyTheme((storedTheme() as 'light' | 'dark' | null) ?? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+$('theme').onclick = () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* the choice lasts this visit only */ }
+  applyTheme(next);
+};
+
+// the canvas fills the view (CSS sizes it); the drawing buffer follows the view's size, so nothing overflows or scrolls
 function resize() {
-  const w = view.clientWidth, h = view.clientHeight;
+  const w = Math.max(1, view.clientWidth), h = Math.max(1, view.clientHeight);
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-window.addEventListener('resize', () => { resize(); idMap = null; drawOverlay(); });
+new ResizeObserver(() => { resize(); idMap = null; drawOverlay(); }).observe(view);
 resize();
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 
@@ -237,7 +270,7 @@ function renderPoints() {
   const neckLi = document.createElement('li');
   neckLi.innerHTML = '<b>neck</b>a press-fit band round the neck, no magnet';
   neckLi.classList.toggle('active', activePoint === 'neck');
-  neckLi.onclick = () => { activePoint = 'neck'; select.value = 'neck'; onPointChange(); };
+  neckLi.onclick = () => choosePoint('neck');
   const neckOpt = document.createElement('option');
   neckOpt.value = 'neck'; neckOpt.textContent = 'neck (band)';
   for (const [name, p] of Object.entries(profile.points)) {
@@ -245,7 +278,7 @@ function renderPoints() {
     const shape = p.shape === 'box' && p.size ? `${p.size[0].toFixed(1)} × ${p.size[1].toFixed(1)} block` : `${p.diameter.toFixed(1)} dia`;
     li.innerHTML = `<b>${name}</b>${shape} × ${p.depth.toFixed(1)} mm, ${p.mode ?? 'open'}${p.skin ? ` under ${p.skin.toFixed(1)} mm` : ''}`;
     li.classList.toggle('active', name === activePoint);
-    li.onclick = () => { activePoint = name; select.value = name; onPointChange(); };
+    li.onclick = () => choosePoint(name);
     list.appendChild(li);
     const opt = document.createElement('option');
     opt.value = name; opt.textContent = name;
@@ -254,20 +287,19 @@ function renderPoints() {
   }
   list.appendChild(neckLi);
   select.appendChild(neckOpt);
-  if (!activePoint && Object.keys(profile.points).length) { activePoint = Object.keys(profile.points)[0]; renderPoints(); return; }
+  if (!activePoint && Object.keys(profile.points).length) { activePoint = Object.keys(profile.points)[0]; restorePosition(); renderPoints(); return; }
   select.value = activePoint;
   $('neck-panel').classList.toggle('hidden', activePoint !== 'neck');
   $('pocket-details').classList.toggle('hidden', activePoint === 'neck');
   pointHint();
   ensureBand();
 }
-/** After the point changes: the fit is stale, a picture is rebuilt for the new place, the preview moves. */
+/** After the point changes: the fit is stale, the model is rebuilt with the new place's mount, the preview moves. */
 function onPointChange() {
   clearFitted();
   renderPoints();
-  flatMountAt = undefined; // a moved mount belongs to the place it was moved at
   if (flatDesign) buildFlatNow();
-  else if (rawModel && $<HTMLSelectElement>('prep-puck').value !== 'never') applyPrepare();
+  else if (rawModel) applyPrepare();
   else updatePreview();
 }
 
@@ -297,7 +329,8 @@ async function loadFile(file: File, stay = false) {
     loaded = await loadModel(file.name, await file.arrayBuffer(), { repair: $<HTMLInputElement>('repair-import').checked, voxel: voxel === '' ? undefined : Number(voxel) });
     rawModel = loaded.solid;
     rawName = file.name;
-    flatDesign = null; flatResult = null; flatMountAt = undefined; puckAt = undefined;
+    preparedKey = '';
+    resetFlatPanel();
     // a 3MF's colours become the palette, so they come through to the paint tab and the export
     if (loaded.materials && loaded.firstID !== undefined) {
       modelTags = { firstID: loaded.firstID, count: loaded.materials.length, fallback: loaded.fallback ?? 0 };
@@ -321,6 +354,7 @@ async function loadFile(file: File, stay = false) {
   $('prepare-controls').classList.remove('hidden');
   $<HTMLButtonElement>('wrap-garment').disabled = false;
   if (!(stay && tab === 'clothing')) setTab('accessory');
+  resetPositions(); // a new model starts every position afresh
   await applyPrepare();
   $('cloth-model').textContent = `${file.name} is loaded and ready to wrap.${loaded.repaired ? ' It was rebuilt on a voxel grid on import.' : ''}`;
   updateClearButtons();
@@ -336,8 +370,9 @@ function clearModel() {
   clearFitted();
   rawModel = null;
   rawName = '';
-  flatDesign = null; flatResult = null; flatMountAt = undefined; puckAt = undefined; preparedPuckAt = null;
-  $('flat-info').textContent = '';
+  preparedKey = '';
+  resetFlatPanel();
+  puckAt = undefined; preparedPuckAt = null;
   $('puck-info').textContent = '';
   if (modelTags) { modelTags = null; setPalette(DEFAULT_PALETTE); }
   baseManifold = null;
@@ -354,9 +389,10 @@ function clearModel() {
   $('cloth-model').textContent = 'No model loaded; Make shirt needs none.';
   $('cloth-result').textContent = '';
   $<HTMLButtonElement>('wrap-garment').disabled = true;
+  resetPositions();
   updateClearButtons();
   updatePreview();
-  status('Cleared. Load another model, or make a shirt.');
+  status('Cleared. Load another model or a picture, or make a shirt.');
 }
 /** The Clear buttons are live when there is something to clear: a loaded model or a fitted part. */
 function updateClearButtons() {
@@ -382,12 +418,16 @@ async function applyPrepare() {
   prep.plug = pd > 0 && ph > 0 ? { diameter: pd, height: ph } : undefined;
   const fillDepth = Number($<HTMLInputElement>('prep-fill').value);
   prep.fill = fillDepth > 0 ? fillDepth : undefined;
+  // the puck: always, never, or when the model on its own has no room for the pocket at the magnet; under the model or behind it
+  const puckMode = activePoint === 'neck' ? 'never' : $<HTMLSelectElement>('prep-puck').value;
+  const magnet = magnetSize();
+  const attach = $<HTMLSelectElement>('prep-puck-attach').value as 'under' | 'behind';
+  const puck = { diameter: Number($<HTMLInputElement>('prep-puck-d').value) || magnet.diameter + 4, height: Number($<HTMLInputElement>('prep-puck-h').value) || magnet.puckHeight, at: puckAt, attach };
+  // the same model prepared the same way (another position with the same mount) needs no second pass
+  const key = JSON.stringify([loadSerial, prep.down, prep.scale, prep.width, prep.centre, prep.plug, prep.fill, puckMode, puck]);
+  if (key === preparedKey && accessoryObject) { updatePreview(); return; }
   if (prep.fill) { status('Filling the hollow underside…'); await new Promise((r) => setTimeout(r, 20)); }
   try {
-    // the puck: always, never, or when the model on its own has no room for the pocket at the magnet
-    const puckMode = activePoint === 'neck' ? 'never' : $<HTMLSelectElement>('prep-puck').value;
-    const magnet = magnetSize();
-    const puck = { diameter: Number($<HTMLInputElement>('prep-puck-d').value) || magnet.diameter + 4, height: Number($<HTMLInputElement>('prep-puck-h').value) || magnet.puckHeight, at: puckAt };
     prep.puck = puckMode === 'always' ? puck : undefined;
     let prepared = await prepareAccessory(rawModel, prep);
     let puckNote = '';
@@ -396,20 +436,25 @@ async function applyPrepare() {
       else { prep.puck = puck; prepared = await prepareAccessory(rawModel, prep); }
     }
     preparedPuckAt = prepared.puck?.at ?? null;
-    if (prepared.puck) puckNote = `Puck ${prep.puck!.diameter.toFixed(1)} × ${prep.puck!.height.toFixed(1)} mm under (${prepared.puck.at.map((v) => v.toFixed(1)).join(', ')}) of the model; it is the base now.`;
+    if (prepared.puck) puckNote = attach === 'behind'
+      ? `Puck ${prep.puck!.diameter.toFixed(1)} × ${prep.puck!.height.toFixed(1)} mm behind the model at x ${prepared.puck.at[0].toFixed(1)}: it rests on the goose and the model stands just in front of it.`
+      : `Puck ${prep.puck!.diameter.toFixed(1)} × ${prep.puck!.height.toFixed(1)} mm under (${prepared.puck.at.map((v) => v.toFixed(1)).join(', ')}) of the model; it is the base now.`;
     else if (puckMode === 'never') puckNote = '';
     $('puck-info').textContent = puckNote;
     accessoryManifold = prepared.solid;
     accessoryMesh = fromManifold(prepared.solid);
     const size = prepared.size.map((v) => v.toFixed(1)).join(' × ');
     const fill = prepared.fill ? ` Filled ${prepared.fill.volume.toFixed(0)} mm³, ${prepared.fill.depth.toFixed(1)} mm deep from a floor ${prepared.fill.floor.toFixed(1)} mm above the lowest point.` : '';
-    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}.${fill}${prepared.puck ? ' Puck added underneath.' : ''}${prepared.warnings.length ? ` ${prepared.warnings.join('; ')}.` : ''} Place it, then Fit.`);
+    status(`${rawName}: ${size} mm after preparing${prep.width ? ` (scaled ×${prepared.scale.toFixed(3)})` : ''}.${fill}${prepared.puck ? ` Puck added ${attach === 'behind' ? 'behind' : 'underneath'}.` : ''}${prepared.warnings.length ? ` ${prepared.warnings.join('; ')}.` : ''} Place it, then Fit.`);
   } catch (err) {
     status(`Prepare failed: ${(err as Error).message}`);
     return;
   }
+  preparedKey = key;
   showAccessory();
 }
+/** What the last prepare was made from, so a position change with the same mount skips it. */
+let preparedKey = '';
 
 function showAccessory() {
   if (!accessoryMesh) return;
@@ -423,6 +468,7 @@ function showAccessory() {
   accessoryPivot.add(accessoryObject);
   if (!accessoryPivot.parent) scene.add(accessoryPivot);
   $('accessory-controls').classList.remove('hidden');
+  updateMountControls();
   updatePreview();
 }
 
@@ -434,8 +480,14 @@ for (const id of ['prep-down', 'prep-width', 'prep-scale', 'prep-centre']) {
   $<HTMLInputElement>(id).onchange = () => { puckAt = undefined; applyPrepare(); }; // the model's frame changes, so a moved puck starts over
 }
 for (const id of ['prep-plug-d', 'prep-plug-h', 'prep-fill', 'prep-puck', 'prep-puck-d', 'prep-puck-h']) {
-  $<HTMLInputElement>(id).onchange = () => { applyPrepare(); };
+  $<HTMLInputElement>(id).onchange = () => { updateMountControls(); applyPrepare(); };
 }
+// a puck behind starts over where it joins, and turns a model on the head to face the beak
+$<HTMLSelectElement>('prep-puck-attach').onchange = () => {
+  puckAt = undefined;
+  $<HTMLInputElement>('spin').value = String(defaultSpin());
+  applyPrepare();
+};
 /**
  * The magnet the pocket is cut for: the pocket boxes when typed, else the point's own void (a box by its diagonal);
  * and the puck height that leaves a floor under its pocket, which starts a sink above the base.
@@ -450,48 +502,92 @@ function magnetSize(): { diameter: number; thickness: number; puckHeight: number
 }
 
 // ---------- flat accessories from a picture ----------
-/** Reads a picture or SVG as a design and builds it. */
+// a picture goes through the Prepare image dialog (background, colours, cleanup, exposure) and is traced with what it
+// shows; the decoded picture is kept so Adjust can open the dialog again. An SVG keeps its own fills and needs none.
+let flatRaster: Raster | null = null;
+let flatImageSettings: Partial<ImageSettings> = {};
+const flatEmpty = $('flat-preview').innerHTML;
+const flatInfoDefault = $('flat-info').textContent ?? '';
+
+/** The traced picture as a design for the plate. */
+const designOf = (p: { width: number; height: number; silhouette: FlatDesign['silhouette']; regions: FlatDesign['regions'] }): FlatDesign => ({ width: p.width, height: p.height, silhouette: p.silhouette, regions: p.regions.map((r) => ({ color: r.color, contours: r.contours })) });
+
+/** Reads a picture or SVG as a design and builds it. Cancelling the dialog keeps whatever was there before. */
 async function loadFlat(file: File) {
-  status(`Tracing ${file.name}…`);
-  await new Promise((r) => setTimeout(r, 20));
   try {
-    let design: FlatDesign;
+    let design: FlatDesign, info: string;
+    let raster: Raster | null = null;
+    let settings: Partial<ImageSettings> = {};
     if (/\.svg$/i.test(file.name)) {
+      status(`Reading ${file.name}…`);
       const doc = parseSvg(await file.text());
       const shapes = doc.shapes.filter((sh) => sh.fill !== 'none');
       if (!shapes.length) throw new Error('no filled shapes in the SVG');
-      // SVG y runs down the page; the design wants it up
-      design = svgDesign(shapes.map((sh) => ({ ...sh, contours: sh.contours.map((c) => c.map((v, i) => (i % 2 ? -v : v))) })));
-      $('flat-info').textContent = `${file.name}: ${shapes.length} shape${shapes.length === 1 ? '' : 's'}, ${design.regions.length} colour${design.regions.length === 1 ? '' : 's'}.`;
+      design = svgDesign(shapes); // parseSvg has already turned the page's y-down into y up
+      info = `${file.name}: a vector file, ${shapes.length} shape${shapes.length === 1 ? '' : 's'}, ${design.regions.length} colour${design.regions.length === 1 ? '' : 's'} from its fills.`;
     } else {
-      const img = await decodeImage(file);
-      const colors = Math.max(1, Math.min(8, Number($<HTMLInputElement>('flat-colors').value) || 3));
-      const t = traceImage(img, { colors, background: $<HTMLInputElement>('flat-background').checked ? {} : false });
-      if (!t.silhouette.length && !t.regions.length) throw new Error('nothing to trace: the picture is empty or all background');
-      design = { width: t.width, height: t.height, silhouette: t.silhouette, regions: t.regions.map((r) => ({ color: r.color, contours: r.contours })) };
-      $('flat-info').textContent = `${file.name}: ${img.width} × ${img.height} px, ${design.regions.length} colour${design.regions.length === 1 ? '' : 's'} kept.`;
+      status(`Opening ${file.name}…`);
+      raster = await decodeImage(file);
+      status(`Prepare ${file.name}: drop the background and pick the colours to keep.`);
+      const prepared = await prepareImage(raster, file.name, {});
+      if (!prepared) { status(`${file.name} was not used.`); $<HTMLInputElement>('flat-file').value = ''; return; }
+      design = designOf(prepared);
+      settings = prepared.settings;
+      info = `${file.name}: ${raster.width} × ${raster.height} px, ${design.regions.length} colour${design.regions.length === 1 ? '' : 's'} kept.`;
     }
+    flatRaster = raster;
+    flatImageSettings = settings;
     flatDesign = design;
     flatName = file.name;
-    flatMountAt = undefined;
-    rawModel = null; rawName = ''; puckAt = undefined;
+    rawModel = null; rawName = ''; preparedKey = '';
     $('prepare-controls').classList.add('hidden');
     $('model-info').textContent = '';
+    $('flat-info').textContent = info;
+    showFlatPreview();
     $<HTMLButtonElement>('wrap-garment').disabled = true;
-    $<HTMLDetailsElement>('flat-panel').open = true;
     setTab('accessory');
+    resetPositions(); // a new model starts every position afresh
     await buildFlatNow();
   } catch (err) {
     status(`${file.name}: ${(err as Error).message}`);
   }
 }
-/** Options from the picture panel; auto choices follow the chosen point. */
+/** The traced picture in the panel, and the Adjust and Remove buttons. */
+function showFlatPreview() {
+  const el = $('flat-preview');
+  if (flatDesign) el.replaceChildren(tracedPreview(flatDesign));
+  else el.innerHTML = flatEmpty;
+  const adjust = $<HTMLButtonElement>('flat-adjust');
+  adjust.disabled = !flatRaster;
+  adjust.title = flatRaster ? 'Background, colours, cleanup and exposure' : flatDesign ? 'A vector file keeps its own colours' : 'Choose a picture first';
+  $<HTMLButtonElement>('flat-remove').disabled = !flatDesign;
+}
+/** Forgets the picture: the panel goes back to empty. */
+function resetFlatPanel() {
+  flatDesign = null; flatResult = null; flatMountAt = undefined; flatRaster = null; flatImageSettings = {};
+  $('flat-info').textContent = flatInfoDefault;
+  $<HTMLInputElement>('flat-file').value = '';
+  showFlatPreview();
+}
+$('flat-adjust').onclick = async () => {
+  if (!flatRaster || !flatDesign) return;
+  const prepared = await prepareImage(flatRaster, flatName, flatImageSettings);
+  if (!prepared) return;
+  flatImageSettings = prepared.settings;
+  flatDesign = designOf(prepared);
+  flatMountAt = undefined; // the outline may have changed under it
+  $('flat-info').textContent = `${flatName}: ${flatRaster.width} × ${flatRaster.height} px, ${flatDesign.regions.length} colour${flatDesign.regions.length === 1 ? '' : 's'} kept.`;
+  showFlatPreview();
+  await buildFlatNow();
+};
+$('flat-remove').onclick = () => clearModel();
+/** Options from the picture panel and the position's mount. */
 function flatOptions(): FlatOptions {
   const num = (id: string, d: number) => { const v = Number($<HTMLInputElement>(id).value); return v > 0 ? v : d; };
-  let orientation = $<HTMLSelectElement>('flat-orientation').value as 'auto' | 'flat' | 'standing';
-  if (orientation === 'auto') orientation = activePoint === 'head' ? 'standing' : 'flat';
+  const orientation = $<HTMLSelectElement>('flat-orientation').value as FlatOptions['mount']['orientation'];
   let kind = $<HTMLSelectElement>('flat-mount').value as FlatOptions['mount']['kind'];
   if (activePoint === 'neck') kind = 'none'; // the band holds it
+  const attach = orientation === 'flat' ? 'back' : ($<HTMLSelectElement>('flat-attach').value as 'back' | 'bottom');
   const magnet = magnetSize();
   return {
     width: num('flat-width', DEFAULT_FLAT.width),
@@ -500,8 +596,15 @@ function flatOptions(): FlatOptions {
     sides: $<HTMLSelectElement>('flat-sides').value as FlatOptions['sides'],
     margin: Math.max(0, Number($<HTMLInputElement>('flat-margin').value) || 0),
     fillHoles: $<HTMLInputElement>('flat-fill-holes').checked,
-    mount: { kind, orientation, at: flatMountAt, diameter: num('flat-puck-d', magnet.diameter + 4), height: num('flat-puck-h', magnet.puckHeight) },
+    mount: { kind, orientation, attach, at: flatMountAt, diameter: num('flat-puck-d', magnet.diameter + 4), height: num('flat-puck-h', magnet.puckHeight) },
   };
+}
+/** Where the puck goes on the picture, in words. */
+function mountWords(m: FlatOptions['mount']): string {
+  if (m.kind === 'none') return 'no magnet mount';
+  if (m.kind === 'plate') return 'magnet in the plate';
+  const where = m.orientation === 'flat' ? 'under its back' : m.attach === 'bottom' ? 'under its bottom edge' : 'behind it, standing on the goose';
+  return `${m.diameter.toFixed(1)} × ${m.height.toFixed(1)} mm puck ${where}`;
 }
 let flatSerial = 0;
 /** Builds the picture into the accessory with the current options and shows it. */
@@ -521,16 +624,10 @@ async function buildFlatNow() {
     setPalette([...r.materials, ...DEFAULT_PALETTE.slice(1).filter((d) => !r.materials.some((m) => m.color === d.color))]);
     baseManifold = null;
     loadSerial++;
-    // a picture standing on the head faces the beak; one on the band is upright already
-    const pt = currentPoint();
-    if (opts.mount.orientation === 'standing' && pt && pt.axis[2] > 0.5) {
-      const spin = Math.round(spinToward(pt.axis, [0, -1], forwardOnGoose()));
-      $<HTMLInputElement>('spin').value = String(spin);
-    }
-    const mount = opts.mount.kind === 'none' ? 'no magnet mount' : opts.mount.kind === 'plate' ? 'magnet in the plate' : `${opts.mount.diameter.toFixed(1)} × ${opts.mount.height.toFixed(1)} mm puck ${opts.mount.orientation === 'standing' ? 'under the bottom edge' : 'behind'} at (${r.mountAt.map((v) => v.toFixed(1)).join(', ')})`;
     const size = `${r.size[0].toFixed(1)} × ${r.size[1].toFixed(1)} × ${opts.depth} mm`;
-    $('model-info').textContent = `${flatName}: ${size}, ${r.materials.length} colour${r.materials.length === 1 ? '' : 's'}, ${opts.mount.orientation}, ${mount}.`;
-    status(`Picture built: ${size}, ${opts.mount.orientation}.${r.warnings.length ? ` ${r.warnings.join('; ')}.` : ''} Place it, then Fit.`);
+    const facing = opts.mount.orientation === 'standing' ? 'standing up' : 'lying flat';
+    $('model-info').textContent = `${flatName}: ${size}, ${r.materials.length} colour${r.materials.length === 1 ? '' : 's'}, ${facing}, ${mountWords(opts.mount)}.`;
+    status(`Picture built: ${size}, ${facing}.${r.warnings.length ? ` ${r.warnings.join('; ')}.` : ''} Place it, then Fit.`);
     showAccessory();
   } catch (err) {
     status(`Picture failed: ${(err as Error).message}`);
@@ -547,10 +644,93 @@ $<HTMLInputElement>('flat-file').onchange = (e) => {
   const f = (e.target as HTMLInputElement).files?.[0];
   if (f) loadFlat(f);
 };
-for (const id of ['flat-colors', 'flat-background']) $<HTMLInputElement>(id).onchange = () => { if (flatDesign) status('Choose the picture again to trace it with the new colour settings.'); };
-for (const id of ['flat-width', 'flat-depth', 'flat-inlay', 'flat-sides', 'flat-margin', 'flat-fill-holes', 'flat-orientation', 'flat-mount', 'flat-puck-d', 'flat-puck-h']) {
-  $<HTMLInputElement>(id).onchange = () => { if (id === 'flat-orientation' || id === 'flat-width') flatMountAt = undefined; if (flatDesign) buildFlatNow(); };
+for (const id of ['flat-width', 'flat-depth', 'flat-inlay', 'flat-sides', 'flat-margin', 'flat-fill-holes', 'flat-mount', 'flat-puck-d', 'flat-puck-h']) {
+  $<HTMLInputElement>(id).onchange = () => { if (id === 'flat-width') flatMountAt = undefined; updateMountControls(); if (flatDesign) buildFlatNow(); };
 }
+// turning the picture up or down, or joining the puck elsewhere, starts the mount and the spin over for that layout
+for (const id of ['flat-orientation', 'flat-attach']) {
+  $<HTMLSelectElement>(id).onchange = () => {
+    flatMountAt = undefined;
+    updateMountControls();
+    $<HTMLInputElement>('spin').value = String(defaultSpin());
+    if (flatDesign) buildFlatNow();
+  };
+}
+
+// ---------- the magnet mount and the placement, per position ----------
+// each position keeps its own placement and mount, so a picture standing on the head and one lying on a wing do not
+// share a spin or a puck; a new model starts every position afresh from its defaults
+const POSITION_FIELDS = ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy', 'flat-mount', 'flat-orientation', 'flat-attach', 'flat-puck-d', 'flat-puck-h', 'prep-puck', 'prep-puck-attach', 'prep-puck-d', 'prep-puck-h'];
+interface PositionState { values: Record<string, string>; flatMountAt?: [number, number]; puckAt?: [number, number] }
+const positions = new Map<string, PositionState>();
+/** A position's starting settings: pictures stand up on the head (puck behind, resting on it) and lie flat elsewhere; the neck band needs no magnet. */
+function positionDefaults(name: string): Record<string, string> {
+  return {
+    sink: name === 'neck' ? '0' : '2', spin: '0', 'tilt-x': '0', 'tilt-y': '0', dx: '0', dy: '0',
+    'flat-mount': name === 'neck' ? 'none' : 'puck', 'flat-orientation': name === 'head' ? 'standing' : 'flat', 'flat-attach': 'back', 'flat-puck-d': '', 'flat-puck-h': '',
+    'prep-puck': name === 'neck' ? 'never' : 'auto', 'prep-puck-attach': 'under', 'prep-puck-d': '', 'prep-puck-h': '',
+  };
+}
+/** The spin a layout starts with: something standing on top of the goose (the head) turns to face the beak. */
+function defaultSpin(): number {
+  const pt = currentPoint();
+  if (!pt || pt.axis[2] <= 0.5) return 0;
+  const standing = flatDesign ? $<HTMLSelectElement>('flat-orientation').value === 'standing' : !!rawModel && $<HTMLSelectElement>('prep-puck-attach').value === 'behind';
+  return standing ? Math.round(spinToward(pt.axis, [0, -1], forwardOnGoose())) : 0;
+}
+function savePosition() {
+  if (!activePoint) return;
+  positions.set(activePoint, { values: Object.fromEntries(POSITION_FIELDS.map((id) => [id, $<HTMLInputElement>(id).value])), flatMountAt, puckAt });
+}
+function restorePosition() {
+  const saved = positions.get(activePoint);
+  const values = saved?.values ?? positionDefaults(activePoint);
+  for (const id of POSITION_FIELDS) $<HTMLInputElement>(id).value = values[id] ?? '';
+  flatMountAt = saved?.flatMountAt;
+  puckAt = saved?.puckAt;
+  updateMountControls();
+  if (!saved) $<HTMLInputElement>('spin').value = String(defaultSpin());
+  for (const id of ['sink', 'spin', 'tilt-x', 'tilt-y', 'dx', 'dy']) syncSlider(id);
+}
+/** Forgets every position's settings (a new model), and sets the current one to its defaults. */
+function resetPositions() {
+  positions.clear();
+  restorePosition();
+}
+/** Moves to another position: this one's settings are kept for coming back, the other's are put in place. */
+function choosePoint(name: string) {
+  if (name === activePoint) return;
+  savePosition();
+  activePoint = name;
+  restorePosition();
+  onPointChange();
+}
+/** Shows the mount choices that apply to what is loaded and where, and explains the one chosen. */
+function updateMountControls() {
+  const neck = activePoint === 'neck';
+  $('mount-details').classList.toggle('hidden', neck);
+  $('flat-mount-controls').classList.toggle('hidden', !flatDesign);
+  $('puck-controls').classList.toggle('hidden', !rawModel);
+  const kind = $<HTMLSelectElement>('flat-mount').value;
+  const orientation = $<HTMLSelectElement>('flat-orientation').value;
+  const attach = $<HTMLSelectElement>('flat-attach');
+  // a picture lying flat has only its back to join a puck to
+  attach.querySelector<HTMLOptionElement>('option[value="bottom"]')!.disabled = orientation === 'flat';
+  if (orientation === 'flat') attach.value = 'back';
+  attach.disabled = kind !== 'puck' || orientation === 'flat';
+  $<HTMLSelectElement>('flat-orientation').disabled = kind === 'none';
+  for (const id of ['flat-puck-d', 'flat-puck-h']) $<HTMLInputElement>(id).disabled = kind !== 'puck';
+  const hint = kind === 'none' ? 'No magnet: glue it on, or wear it on the neck band.'
+    : kind === 'plate' ? (orientation === 'standing' ? 'A standing picture needs a puck: its edge is too thin for the magnet.' : 'The magnet goes into the picture\'s back, which lies on the goose; 4 mm or more of thickness holds it.')
+    : orientation === 'flat' ? 'Parallel: the puck is under the picture\'s back, and the picture lies on the goose over the magnet.'
+    : attach.value === 'back' ? 'Perpendicular: the puck rests on the goose behind the picture, joined to its back at the bottom, and the picture stands just in front of it facing the beak.'
+    : 'Perpendicular: the puck is under the picture\'s bottom edge, and the picture stands on top of it.';
+  $('flat-mount-hint').textContent = hint;
+  const never = $<HTMLSelectElement>('prep-puck').value === 'never';
+  for (const id of ['prep-puck-attach', 'prep-puck-d', 'prep-puck-h']) $<HTMLInputElement>(id).disabled = never;
+  $<HTMLButtonElement>('move-mount').disabled = !accessoryObject;
+}
+
 // drag a file anywhere onto the page
 for (const ev of ['dragenter', 'dragover']) document.addEventListener(ev, (e) => { e.preventDefault(); view.classList.add('drop'); });
 document.addEventListener('dragleave', (e) => { if (!(e as DragEvent).relatedTarget) view.classList.remove('drop'); });
@@ -752,7 +932,7 @@ function showGizmo(on: boolean) {
 for (const id of ['pocket-dia', 'pocket-thick', 'pocket-radial', 'pocket-axial', 'pocket-none', 'pocket-ribs', 'pocket-rib-count', 'pocket-rib-crush']) {
   $<HTMLInputElement>(id).onchange = clearFitted;
 }
-$<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTMLSelectElement).value; onPointChange(); };
+$<HTMLSelectElement>('point').onchange = (e) => choosePoint((e.target as HTMLSelectElement).value);
 function pointHint() {
   const w = POINT_WIDTH[activePoint];
   const input = $<HTMLInputElement>('prep-width');
@@ -763,15 +943,30 @@ function pointHint() {
 function clearFitted() {
   if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); fittedObject = null; }
   fitted = null;
+  // the band goes back to the one the options make, with its tabs at full length
+  if (fittedBand && neckBand) showBand(neckBand.band);
   fittedBand = null;
   paint = null;
-  $<HTMLButtonElement>('export-fitted').disabled = true;
-  $<HTMLButtonElement>('export-cloth').disabled = true;
   $<HTMLButtonElement>('paint-tab-button').disabled = true;
   $('fit-result').textContent = '';
   if (accessoryObject) accessoryObject.visible = tab !== 'clothing';
   if (ghost) ghost.visible = tab === 'clothing';
+  updateExports();
   applyFocus();
+}
+
+/** The export buttons are live when there is a fitted part or a garment, and the panel says what they give. */
+function updateExports() {
+  for (const id of ['export-3mf', 'export-fitted', 'export-split']) $<HTMLButtonElement>(id).disabled = !paint;
+  let info = 'Fit an accessory or make a garment to export it.';
+  if (paint) {
+    const used = new Set(paint.faceMaterial).size;
+    const what = fitted ? `The ${activePoint === 'neck' ? 'neck' : activePoint.replace('_', ' ')} accessory` : 'The garment';
+    info = `${what}: ${paint.faceMaterial.length.toLocaleString()} faces, ${used} colour${used === 1 ? '' : 's'}.`;
+    if (fittedBand) info += ' The neck band is its own part: a second STL, or a second part in the 3MF.';
+    if (!fitted && garmentParts) info += ` STL gives ${garmentParts.length} files, one per half.`;
+  }
+  $('export-info').textContent = info;
 }
 
 /** Shows `mesh` as the fitted part, with per-face paint colours: `faceMaterial` when known, else carried over from the part shown before. */
@@ -804,6 +999,7 @@ function showFitted(mesh: IndexedMesh, faceMaterial?: Uint8Array) {
   $<HTMLButtonElement>('paint-tab-button').disabled = false;
   $('paint-info').textContent = `${(mesh.triangles.length / 3).toLocaleString()} faces.`;
   updateClearButtons();
+  updateExports();
   if (focusOn()) frameFitted();
 }
 
@@ -823,6 +1019,8 @@ $('fit').onclick = async () => {
       const r = await fitOnNeck(gooseManifold, accessoryManifold, profile, band, rest, neckOptions());
       fitted = r;
       fittedBand = r.band;
+      showBand(r.band); // with its tabs as long as the accessory has room for, or none
+      $('neck-info').textContent = band.tabs.length ? (r.tabLength ? `Fitted with ${r.tabLength.toFixed(1)} mm tabs; the slots stop ${SLOT_SKIN} mm short of the accessory's front.` : 'Fitted without tabs: the accessory is too thin for slots, so glue it to the band.') : 'Fitted for gluing to the band.';
     } else {
       fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, placement());
     }
@@ -830,8 +1028,8 @@ $('fit').onclick = async () => {
     showFitted(fitted.mesh, tagged?.faceMaterial);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('fit-result').textContent = `Fitted in ${secs} s: ${fitted.volumeBefore.toFixed(0)} → ${fitted.volumeAfter.toFixed(0)} mm³, ${fitted.bodies} body.` + (fittedBand ? ' The band is a separate part: Export gives both.' : '') + (fitted.warnings.length ? ` Warnings: ${fitted.warnings.join('; ')}` : '');
-    $<HTMLButtonElement>('export-fitted').disabled = false;
-    status('Fit done. Export or adjust and fit again.');
+    updateExports();
+    status('Fit done. Export on the right, or adjust and fit again.');
   } catch (err) {
     status(`Fit failed: ${(err as Error).message}`);
   } finally {
@@ -839,13 +1037,13 @@ $('fit').onclick = async () => {
   }
 };
 
-const exportStl = () => {
+/** STL: the fitted part (plus the neck band as a second file), or a garment, one file per half when it is split. */
+$('export-fitted').onclick = () => {
   if (!paint) return;
-  download(`accessory.${activePoint}.fitted.stl`, serializeStl(paint.mesh));
+  if (!fitted && garmentParts) { garmentParts.forEach((p, i) => setTimeout(() => download(`${garmentName}.${'ab'[i] ?? i}.stl`, serializeStl(p)), i * 300)); return; }
+  download(`${exportName()}.stl`, serializeStl(paint.mesh));
   if (fittedBand) setTimeout(() => download('accessory.neck.band.stl', serializeStl(fromManifold(fittedBand!))), 300);
 };
-$('export-fitted').onclick = exportStl;
-$('export-fitted-2').onclick = exportStl;
 
 // ---------- paint ----------
 let paint: PaintState | null = null;
@@ -942,39 +1140,75 @@ $('export-split').onclick = async () => {
 renderPalette();
 
 // ---------- focus view: the goose and its markers out of the way, the camera on the accessory ----------
-const focusOn = () => (tab === 'paint' && $<HTMLInputElement>('paint-focus').checked) || (tab === 'accessory' && $<HTMLInputElement>('accessory-focus').checked);
+// the Hide goose button over the view; it applies on every tab but Hole, where the goose is what you click
+let focus = false;
+const focusOn = () => focus && tab !== 'hole';
 let savedView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
-/** Hides or shows everything that is not the accessory (fitted or placed). */
+/** The part on its own: fitted, placed, or the wrap preview. */
+function focusSubject(): THREE.Object3D | null {
+  return fittedObject ?? (accessoryObject && accessoryObject.visible ? accessoryPivot : null) ?? (ghost && ghost.visible ? ghost : null);
+}
+/** Hides or shows everything that is not the part; the camera frames the part when the goose goes, and comes back after. */
 function applyFocus() {
-  const on = focusOn() && !!(fittedObject || (accessoryObject && accessoryObject.visible));
+  const on = focusOn() && !!focusSubject();
   if (gooseObject) gooseObject.visible = !on;
   markers.visible = !on;
   if (pickMarker) pickMarker.visible = !on;
   grid.visible = !on;
   if (bandObject) bandObject.visible = !on && activePoint === 'neck';
-  if (on) {
-    if (!savedView) savedView = { position: camera.position.clone(), target: controls.target.clone() };
+  if (on && !savedView) {
+    savedView = { position: camera.position.clone(), target: controls.target.clone() };
     frameFitted();
-  } else if (savedView) {
+  } else if (!on && savedView) {
     camera.position.copy(savedView.position);
     controls.target.copy(savedView.target);
     savedView = null;
   }
 }
-/** Moves the camera, keeping its direction, so the accessory fills the view. */
-function frameFitted() {
-  const target = fittedObject ?? (accessoryObject && accessoryObject.visible ? accessoryPivot : null);
-  if (!target) return;
-  const box = new THREE.Box3().setFromObject(target);
-  const centre = box.getCenter(new THREE.Vector3());
-  const radius = box.getSize(new THREE.Vector3()).length() / 2;
-  const dir = camera.position.clone().sub(controls.target).normalize();
-  const dist = (radius / Math.sin((camera.fov / 2) * (Math.PI / 180))) * 1.15;
-  controls.target.copy(centre);
-  camera.position.copy(centre).addScaledVector(dir, Math.max(dist, 20));
+/** Everything shown that the view should take in: the part alone when the goose is hidden. */
+function subjectBox(): THREE.Box3 {
+  const box = new THREE.Box3();
+  const part = focusSubject();
+  if (focusOn() && part) return box.setFromObject(part);
+  for (const o of [gooseObject, part, bandObject && bandObject.visible ? bandObject : null]) if (o) box.expandByObject(o);
+  return box;
 }
-$<HTMLInputElement>('paint-focus').onchange = applyFocus;
-$<HTMLInputElement>('accessory-focus').onchange = applyFocus;
+/** Points the camera along `dir` (from the subject towards the camera; the current direction when not given) at a distance that fits the subject in the view. */
+function frameView(dir?: THREE.Vector3) {
+  const box = subjectBox();
+  if (box.isEmpty()) return;
+  const centre = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(5, box.getSize(new THREE.Vector3()).length() / 2);
+  const d = (dir ?? camera.position.clone().sub(controls.target)).clone().normalize();
+  const vfov = THREE.MathUtils.degToRad(camera.fov);
+  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+  const dist = (radius / Math.sin(Math.min(vfov, hfov) / 2)) * 1.05;
+  controls.target.copy(centre);
+  camera.position.copy(centre).addScaledVector(d, dist);
+  controls.update();
+  idMap = null;
+}
+/** Frames the part, keeping the camera's direction. */
+function frameFitted() { frameView(); }
+$('focus').onclick = () => {
+  focus = !focus;
+  const b = $('focus');
+  b.classList.toggle('on', focus);
+  b.setAttribute('aria-pressed', String(focus));
+  b.textContent = focus ? 'Show goose' : 'Hide goose';
+  applyFocus();
+};
+// views from the goose's own front, side and top (the goose is turned on its base, so these follow it, not the axes)
+{
+  const f = () => { const v = forwardOnGoose(); return new THREE.Vector3(v[0], v[1], 0); };
+  const left = () => { const v = forwardOnGoose(); return new THREE.Vector3(-v[1], v[0], 0); };
+  const up = new THREE.Vector3(0, 0, 1);
+  $('view-iso').onclick = () => frameView(f().multiplyScalar(0.75).addScaledVector(left(), -0.5).addScaledVector(up, 0.5));
+  $('view-front').onclick = () => frameView(f().addScaledVector(up, 0.08));
+  $('view-side').onclick = () => frameView(left().addScaledVector(up, 0.08));
+  $('view-top').onclick = () => frameView(up.clone().addScaledVector(f(), -0.02));
+  $('view-fit').onclick = () => frameView();
+}
 
 // ---------- moving the magnet: a click on the model says where it should be ----------
 function setMoveMode(on: boolean) {
@@ -1000,7 +1234,7 @@ async function moveMountTo(world: THREE.Vector3) {
   } else if (rawModel && preparedPuckAt) {
     puckAt = [preparedPuckAt[0] + dx, preparedPuckAt[1] + dy];
     await applyPrepare();
-    status(`Puck moved under (${puckAt.map((v) => v.toFixed(1)).join(', ')}) of the model. Fit again.`);
+    status($<HTMLSelectElement>('prep-puck-attach').value === 'behind' ? `Puck moved along the model's back to x ${puckAt[0].toFixed(1)}. Fit again.` : `Puck moved under (${puckAt.map((v) => v.toFixed(1)).join(', ')}) of the model. Fit again.`);
   } else if (accessoryObject) {
     const clamp = (v: number) => Math.max(-30, Math.min(30, Math.round(v * 2) / 2));
     $<HTMLInputElement>('dx').value = String(clamp(pl.offset[0] - dx));
@@ -1225,15 +1459,19 @@ function ensureBand(): Promise<NeckBand | null> {
   bandPending = makeNeckBand(gooseManifold, profile, o).then((b) => {
     if (key !== neckKey) return neckBand;
     neckBand = b;
-    if (bandObject) { scene.remove(bandObject); bandObject.geometry.dispose(); }
-    bandObject = new THREE.Mesh(toGeometry(fromManifold(b.band)), bandMaterial);
-    bandObject.visible = activePoint === 'neck' && !focusOn();
-    scene.add(bandObject);
+    showBand(b.band);
     $('neck-info').textContent = `Neck ${b.neckWidth.toFixed(1)} mm across here, opening ${b.openingWidth.toFixed(1)} mm at the back${b.tabs.length ? `, ${b.tabs.length} tabs` : ''}.${b.warnings.length ? ` ${b.warnings.join('; ')}.` : ''}`;
     updatePreview();
     return b;
   }).catch((err) => { status(`Band failed: ${(err as Error).message}`); $('neck-info').textContent = (err as Error).message; return null; });
   return bandPending;
+}
+/** Shows a band on the neck: the one the options make, or the one fitted with its tabs shortened. */
+function showBand(m: ManifoldT) {
+  if (bandObject) { scene.remove(bandObject); bandObject.geometry.dispose(); }
+  bandObject = new THREE.Mesh(toGeometry(fromManifold(m)), bandMaterial);
+  bandObject.visible = activePoint === 'neck' && !focusOn();
+  scene.add(bandObject);
 }
 let bandTimer = 0;
 for (const id of ['neck-height', 'neck-band-h', 'neck-thick', 'neck-clear', 'neck-opening', 'neck-attach', 'neck-tab-d', 'neck-tab-l', 'neck-tab-s']) {
@@ -1340,8 +1578,8 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
     garmentName = kind === 'shirt' ? `shirt.${o.hem}-${o.neck}` : `${rawName.replace(/\.[^.]+$/, '')}.wrapped`;
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('cloth-result').textContent = `Done in ${secs} s: ${g.solid.volume().toFixed(0)} mm³, ${(g.mesh.triangles.length / 3).toLocaleString()} faces. ${g.warnings.join('; ')}`;
-    $<HTMLButtonElement>('export-cloth').disabled = false;
-    status('Garment ready. Export it, or paint it on the Paint tab.');
+    updateExports();
+    status('Garment ready. Export it on the right, or paint it on the Paint tab.');
   } catch (err) {
     status(`Failed: ${(err as Error).message}`);
   } finally {
@@ -1353,11 +1591,6 @@ let garmentName = 'shirt';
 let garmentParts: IndexedMesh[] | null = null;
 $('make-shirt').onclick = () => { makeGarment('shirt'); };
 $('wrap-garment').onclick = () => { makeGarment('wrap'); };
-$('export-cloth').onclick = () => {
-  if (!paint) return;
-  if (garmentParts) garmentParts.forEach((p, i) => download(`${garmentName}.${'ab'[i] ?? i}.stl`, serializeStl(p)));
-  else download(`${garmentName}.stl`, serializeStl(paint.mesh));
-};
 
 // ---------- magnet hole tool ----------
 $<HTMLSelectElement>('hole-mode').onchange = (e) => {
@@ -1443,7 +1676,9 @@ $('cut-hole').onclick = async () => {
       setGoose(fromManifold(gooseManifold));
     }
     profile.points[name] = result.point;
+    savePosition();
     activePoint = name;
+    restorePosition();
     renderPoints();
     $('hole-result').textContent = `${mode} hole "${name}" cut.` + (result.pauseZ !== undefined ? ` Pause the print at Z = ${result.pauseZ.toFixed(2)} mm to insert the magnet.` : '');
     status(`Hole "${name}" added. Export the goose STL to print it.`);
@@ -1472,6 +1707,20 @@ function download(name: string, bytes: Uint8Array) {
   get ringsShown() { return !!gizmo.object; },
   get band() { return neckBand ? { width: neckBand.neckWidth, opening: neckBand.openingWidth, tabs: neckBand.tabs.length, volume: neckBand.band.volume(), shown: !!bandObject && bandObject.visible } : null; },
   get mount() { return flatResult ? flatResult.mountAt : preparedPuckAt; },
+  /** the model's width along x over a band of heights, in its own frame (for checking which way up a picture is) */
+  accessoryWidth(zLo: number, zHi: number) {
+    if (!accessoryMesh) return 0;
+    const p = accessoryMesh.positions;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < p.length; i += 3) if (p[i + 2] >= zLo && p[i + 2] <= zHi) { lo = Math.min(lo, p[i]); hi = Math.max(hi, p[i]); }
+    return hi - lo;
+  },
+  get accessoryBox() {
+    if (!accessoryMesh) return null;
+    const p = accessoryMesh.positions, min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < p.length; i++) { min[i % 3] = Math.min(min[i % 3], p[i]); max[i % 3] = Math.max(max[i % 3], p[i]); }
+    return { min, max };
+  },
   get moveMode() { return moveMode; },
   lookAt(target: V3, position: V3) { controls.target.set(...target); camera.position.set(...position); controls.update(); },
   get camera() { return { position: camera.position.toArray(), target: controls.target.toArray() }; },
