@@ -51,6 +51,9 @@ export interface GarmentOptions {
   collar?: 'tilt' | 'drop';
   /** extra gap around the neck at the collar, mm */
   collarGap?: number;
+  /** open the collar out from the neck and chest by this much, mm, blended in over the top `neckSpreadHeight` mm of the garment */
+  neckSpread?: number;
+  neckSpreadHeight?: number;
   /** axis position; default: area-weighted centre of the body between hem and neck */
   centre?: [number, number];
   /** height step for sampling, mm */
@@ -106,7 +109,7 @@ export interface GarmentOptions {
 }
 
 export const DEFAULT_GARMENT: GarmentOptions = {
-  hem: 46, neck: 108, thickness: 1.6, clearance: 0.4, collar: 'tilt', collarGap: 1, dz: 0.75, nTheta: 144, smooth: 2,
+  hem: 46, neck: 108, thickness: 1.6, clearance: 0.4, collar: 'tilt', collarGap: 1, neckSpread: 0, neckSpreadHeight: 15, dz: 0.75, nTheta: 144, smooth: 2,
   neckline: 'v', necklineDepth: 14, necklineWidth: 45, collarHeight: 0,
   fabric: 'plain', fabricDepth: 0.4, fabricPitch: 48, buttons: 0, buttonDiameter: 3, placket: false, hemBand: 0, stripes: 0, axisToNeck: 1,
   formFit: false, split: 'none', splitMagnets: 3, splitMagnetDiameter: 3, splitMagnetThickness: 1,
@@ -406,7 +409,16 @@ export function cavityProfile(goose: ManifoldT, opts: Partial<GarmentOptions> = 
     swept = o.collar === 'drop' ? clipProfile(full, o.hem, o.neck) : sweepDown(clipProfile(p, o.hem, o.neck));
     if (o.smooth) swept = maxProfile(sweepDown(smoothProfile(swept, o.smooth)), swept);
   }
-  const inner = offsetProfile(swept, o.clearance);
+  let inner = offsetProfile(swept, o.clearance);
+  const spread = o.neckSpread ?? 0, spreadH = Math.max(1, o.neckSpreadHeight ?? 15);
+  if (spread > 0) {
+    // the collar opens out: a smooth ramp from nothing at neck - spreadH to the full spread at the neck
+    inner = { ...inner, r: inner.r.map((row, k) => {
+      const f = Math.min(1, Math.max(0, (inner.z[k] - (o.neck - spreadH)) / spreadH));
+      const g = f * f * (3 - 2 * f);
+      return Float32Array.from(row, (v) => v + spread * g);
+    }) };
+  }
   // the collar: at least the neck plus its gap, at most the cavity top, and up to the head projection
   const neckSlice = sweepDown(clipProfile(p, o.neck, o.neck + 6)).r[0] ?? p.r[p.r.length - 1];
   const top = inner.r[inner.r.length - 1];
@@ -591,10 +603,10 @@ export async function contourGarment(goose: ManifoldT, opts: Partial<GarmentOpti
   solid = solid.subtract(await orient(aboveBodyCutter(cav, o, t)));
   // the collar plate: the shoulders around the neck, as flat 2D shapes, so it is a ring around the neck and not a cone to the axis
   const { CrossSection } = await manifold();
-  const shoulders = CrossSection.union([goose.slice(o.neck - 0.5), goose.slice(o.neck - 2)]).offset(o.clearance + t, 'Round', 2, 32);
+  const shoulders = CrossSection.union([goose.slice(o.neck - 0.5), goose.slice(o.neck - 2)]).offset(o.clearance + t + (o.neckSpread ?? 0), 'Round', 2, 32);
   const neckSlices: CrossSectionT[] = [];
   for (let z = cav.neckSpan[0]; z <= cav.neckSpan[1]; z += 1) neckSlices.push(goose.slice(Math.min(z, cav.neckSpan[1] - 0.01)));
-  const neckHole = CrossSection.union(neckSlices).offset(o.clearance + (o.collarGap ?? 0), 'Round', 2, 32);
+  const neckHole = CrossSection.union(neckSlices).offset(o.clearance + (o.collarGap ?? 0) + (o.neckSpread ?? 0), 'Round', 2, 32);
   // the plate starts a little below the loft's top ring so the two always join; the body's cavity is carved out of it
   const loftTop = cav.inner.z[cav.inner.z.length - 1];
   let plate = Manifold.extrude(shoulders.subtract(neckHole), o.neck + t - (loftTop - 0.5)).translate(0, 0, loftTop - 0.5);
@@ -839,11 +851,16 @@ export async function wrapGarment(garment: ManifoldT, goose: ManifoldT, opts: Pa
     return o.neck - keptHeight - ((fromTop - keepTop) / Math.max(1e-6, gh - keepTop)) * (o.neck - o.hem - keptHeight);
   };
   const liner = Math.max(0, o.liner ?? 0);
+  // the reference radii are read bilinearly between band centres and bin centres, so the seat does not step at each band (stripes)
+  const ref = (table: Float32Array, th: number, uu: number) => {
+    const bf = uu * bands - 0.5, b0 = Math.max(0, Math.min(bands - 1, Math.floor(bf))), b1 = Math.min(bands - 1, b0 + 1), fb = Math.min(1, Math.max(0, bf - b0));
+    const af = (th / (Math.PI * 2)) * N - 0.5, i0 = ((Math.floor(af) % N) + N) % N, i1 = (i0 + 1) % N, fa = af - Math.floor(af);
+    const row = (b: number) => table[b * N + i0] * (1 - fa) + table[b * N + i1] * fa;
+    return row(b0) * (1 - fb) + row(b1) * fb;
+  };
   const positions = new Float32Array(g.positions.length);
   for (let v = 0; v < nv; v++) {
-    const bin = Math.floor(theta[v] / (Math.PI * 2) * N) % N, band = Math.min(bands - 1, Math.floor(u[v] * bands));
-    const idx = band * N + bin;
-    const d = mode === 'shell' ? rad[v] - rmin[idx] : o.thickness + rad[v] - rmax[idx];
+    const d = mode === 'shell' ? rad[v] - ref(rmin, theta[v], u[v]) : o.thickness + rad[v] - ref(rmax, theta[v], u[v]);
     const z = zOf(u[v]);
     // 0.3 mm margin keeps the garment's inside clear of the carving solid, so the cut leaves no slivers or holes
     // the goose pushes the garment out; where the body is absent at that height (behind the neck) the garment keeps its own scaled shape

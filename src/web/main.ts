@@ -231,6 +231,7 @@ async function loadFile(file: File, stay = false) {
   $<HTMLButtonElement>('wrap-garment').disabled = false;
   if (!(stay && tab === 'clothing')) setTab('accessory');
   await applyPrepare();
+  $('cloth-model').textContent = `${file.name} is loaded and ready to wrap.`;
   if (tab === 'clothing') wrapPreview();
 }
 $<HTMLInputElement>('cloth-file').onchange = (e) => {
@@ -579,6 +580,7 @@ function garmentOptions(): Partial<WrapOptions> {
   return {
     hem: num('cloth-hem'), neck: num('cloth-neck'), thickness: num('cloth-thick'), clearance: num('cloth-clear'),
     collar: $<HTMLSelectElement>('cloth-collar').value as GarmentOptions['collar'], collarGap: num('cloth-gap'), smooth: num('cloth-smooth'),
+    neckSpread: num('cloth-spread'), neckSpreadHeight: num('cloth-spread-height'),
     neckline: $<HTMLSelectElement>('cloth-neckline').value as GarmentOptions['neckline'], necklineDepth: num('cloth-neckline-depth'), necklineWidth: num('cloth-neckline-width'),
     collarHeight: num('cloth-collar-height'), frontOffset: num('cloth-front'),
     fabric: $<HTMLSelectElement>('cloth-fabric').value as GarmentOptions['fabric'], fabricDepth: num('cloth-fabric-depth'), fabricPitch: num('cloth-fabric-pitch'),
@@ -604,7 +606,7 @@ function wrapPreview() {
   if (accessoryObject) accessoryObject.visible = false;
   const o = garmentOptions();
   if (o.neck! <= o.hem!) return;
-  const key = [o.hem, o.neck, o.axisToNeck, o.clearance, o.collar, o.smooth, o.frontOffset].join('/');
+  const key = [o.hem, o.neck, o.axisToNeck, o.clearance, o.collar, o.smooth, o.frontOffset, o.neckSpread, o.neckSpreadHeight].join('/');
   if (key !== cavityKey) {
     cavityKey = key;
     cavity = null;
@@ -626,7 +628,7 @@ function wrapPreview() {
   ghost.visible = !fittedObject;
   if (accessoryObject) accessoryObject.visible = false;
 }
-for (const id of ['wrap-turn', 'wrap-dx', 'wrap-dy', 'wrap-band-lo', 'wrap-band-hi', 'wrap-crop-l', 'wrap-crop-r', 'wrap-crop-f', 'wrap-crop-b', 'cloth-keep-top', 'cloth-lean', 'cloth-front', 'cloth-hem', 'cloth-neck']) {
+for (const id of ['wrap-turn', 'wrap-dx', 'wrap-dy', 'wrap-band-lo', 'wrap-band-hi', 'wrap-crop-l', 'wrap-crop-r', 'wrap-crop-f', 'wrap-crop-b', 'cloth-keep-top', 'cloth-spread', 'cloth-spread-height', 'cloth-lean', 'cloth-front', 'cloth-hem', 'cloth-neck']) {
   $<HTMLInputElement>(id).addEventListener('input', wrapPreview);
 }
 $<HTMLInputElement>('cloth-neckline-width').oninput = () => { $('cloth-neckline-width-out').textContent = $<HTMLInputElement>('cloth-neckline-width').value; };

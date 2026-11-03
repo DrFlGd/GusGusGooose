@@ -93,6 +93,11 @@ test('the axis leans to the neck, and the preview frame lands the model between 
   assert.ok(Math.abs(f.heightScale - 2) < 1e-6, `height scale ${f.heightScale}`);
   const cropped = await wrapGarment(sweater, goose, { hem: 25, neck: 65, garmentBand: [5, 25], garmentCrop: [0, 0, 0, 10] });
   assert.ok(cropped.solid.volume() > 0 && cropped.solid.volume() < g.solid.volume());
+  // a neck spread opens the collar out at the top and leaves the hem alone
+  const spreadCav = cavityProfile(goose, { hem: 25, neck: 65, neckSpread: 4, neckSpreadHeight: 15 }), plainCav = cavityProfile(goose, { hem: 25, neck: 65 });
+  const last = spreadCav.inner.r.length - 1;
+  assert.ok(spreadCav.inner.r[last][0] - plainCav.inner.r[last][0] > 3.5, 'collar ring should be about 4 mm wider');
+  assert.ok(Math.abs(spreadCav.inner.r[0][0] - plainCav.inner.r[0][0]) < 1e-6, 'hem ring should be unchanged');
   // a liner adds a smooth layer under the model: more material, still clear of the body, one piece
   const lined = await wrapGarment(sweater, goose, { hem: 25, neck: 65, thickness: 1.5, clearance: 0.4, liner: 1.2 });
   assert.ok(lined.solid.volume() > g.solid.volume() * 1.3, `lined ${lined.solid.volume()} vs plain ${g.solid.volume()}`);

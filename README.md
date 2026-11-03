@@ -86,8 +86,8 @@ node src/cli.ts shirt --hem 46 --neck 108 --thickness 1.6 --clearance 0.4 --out 
 node src/cli.ts wrap --garment sweater.stl --hem 46 --neck 108 --out sweater.fitted.stl
 # line it up first: turn it, shift its axis, keep a height band, crop its sides (left,right,front,back)
 node src/cli.ts wrap --garment jacket.3mf --turn 10 --shift 0,-2 --band 5,60 --crop 0,0,0,8 --keep-top 25
-# a thin or noisy model: put a 1.2 mm smooth liner between it and the body
-node src/cli.ts wrap --garment polo.3mf --liner 1.2
+# a thin or noisy model: put a 1.2 mm smooth liner between it and the body, and open the collar 4 mm out from the neck
+node src/cli.ts wrap --garment polo.3mf --liner 1.2 --neck-spread 4 --neck-spread-height 15
 # two halves that clip on with 3 x 1 mm magnets, hugging the chest and tail (writes .a.stl and .b.stl as well)
 node src/cli.ts shirt --split sides --form-fit --split-magnets 3 --split-magnet-dia 3 --split-magnet-thick 1 --out shirt.stl
 

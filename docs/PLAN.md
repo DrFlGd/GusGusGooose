@@ -162,7 +162,12 @@ A *liner* puts a smooth shell of the body's drop-on shape under the model,
 moving it out by the same amount, so a thin or noisy mesh (the polo's fine
 knit) has solid material behind it instead of slivers where the carve
 grazes it. The front is oriented by the lean itself, not by where the head
-sits in the sheared frame, where it can end up behind the axis.
+sits in the sheared frame, where it can end up behind the axis. The
+model's reference radii (its own inner and outer surface per angle and
+height band) are read with bilinear interpolation, so the seat does not
+step from band to band, which showed as horizontal stripes. A *neck
+spread* opens the collar out from the neck and chest by a set amount,
+blended in over the top of the garment, for shirts and wraps alike.
 
 **Split halves (Jerred, 2026-11-03).** Any garment can be cut in two along
 a plane through the leaned axis, left/right or front/back, with disc-magnet

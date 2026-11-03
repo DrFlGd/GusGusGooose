@@ -105,6 +105,11 @@
 
       <section id="tab-clothing" class="tab hidden">
         <p class="small muted">A shirt, sweater or coat that follows the body between two heights and slips on over the head. No magnets. The two rings on the goose show the hem and neck.</p>
+        <label class="file">
+          <input type="file" id="cloth-file" accept=".stl,.obj,.3mf" />
+          <span>Load a model to wrap (STL, OBJ or 3MF), or drop it on the view</span>
+        </label>
+        <p id="cloth-model" class="small muted">No model loaded; Make shirt needs none.</p>
         <label>Hem height <output id="cloth-hem-out">46</output> mm
           <input type="range" id="cloth-hem" min="10" max="150" step="1" value="46" />
         </label>
@@ -120,6 +125,7 @@
           </select>
         </label>
         <label>Extra gap at the neck <input type="number" id="cloth-gap" step="0.5" value="1" /> mm</label>
+        <label>Spread the collar <input type="number" id="cloth-spread" step="0.5" min="0" value="0" /> mm out from the neck and chest, over the top <input type="number" id="cloth-spread-height" step="1" min="1" value="15" /> mm</label>
         <details open>
           <summary>Neckline and collar</summary>
           <label>Neckline
@@ -172,10 +178,6 @@
         </details>
         <details id="wrap-details">
           <summary>Wrapping a loaded model</summary>
-          <label class="file">
-            <input type="file" id="cloth-file" accept=".stl,.obj,.3mf" />
-            <span>Load a model to wrap (STL, OBJ or 3MF), or drop it on the view</span>
-          </label>
           <p class="muted small">The loaded model is shown where the wrap will put it (scaled and leaned, before bending to the body). Line it up, then wrap. If it imports facing the wrong way, turn it 180°.</p>
           <label>Turn the model <output id="wrap-turn-out">0</output>°
             <input type="range" id="wrap-turn" min="-180" max="180" step="5" value="0" />
