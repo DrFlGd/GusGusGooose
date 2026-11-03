@@ -31,14 +31,23 @@ two halves with small disc-magnet pockets along the seams, and a form-fit
 option lets the halves hug the chest and the tail. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
 pause height reported, and exports the holed goose. The Paint tab (after
-a fit or a garment) paints faces with a palette of your filament colours:
+a fit or a garment) paints with a palette of your filament colours:
 a brush, a bucket that fills a region until it meets another colour or a
 crease (the angle is yours to set), a corners tool that fills whatever you
-can see inside the corners you click, and a text stamp placed as seen from
-the camera (type the text, set the letter height and angle, click to
-stamp); with Refine to split the mesh so edges and letters come out finer,
-Fill all and Undo. It exports a 3MF whose colour regions the slicer maps
-to filaments (STL stays for single-colour parts). The panel walks each tab
+can see inside the corners you click, a text stamp and an image stamp
+placed as seen from the camera (type the text or choose a picture, which
+goes through the same Prepare image dialog as picture accessories; set the
+size and angle, click to stamp; the picture's colours join the palette),
+Fill all and Undo. Every tool paints inside faces the way Bambu Studio
+does: a face a colour edge crosses is split at its edge midpoints, again
+and again down to about a pixel for stamps (a fraction of the radius for
+the brush), so a coarse part takes sharp letters and pictures without
+Refine (still there for a smoother shape). It exports a 3MF whose colour
+regions the slicer maps to filaments, palette colour n as filament n; paint
+inside faces is written as the slicers' own paint (`paint_color` for
+Bambu Studio and OrcaSlicer, `slic3rpe:mmu_segmentation` for PrusaSlicer),
+or, with that option unticked, cut into faces of its own (STL stays for
+single-colour parts). The panel walks each tab
 in numbered steps and every slider has a number box beside it. Number
 boxes have arrows that nudge by 0.1 and take typed values to 0.01 (counts
 such as ribs and buttons stay whole); a slider holds a typed value as well,
@@ -48,9 +57,10 @@ goose's own void), a fit preset (press, snug, loose, or crush ribs) that
 sets the clearances, and crush ribs: round ridges down the pocket wall,
 tapered at the mouth, whose tips sit a set distance inside the magnet so
 a loose pocket still grips. A 3MF that comes in with colours keeps them: each
-part's filament slot, paint applied in Bambu Studio or PrusaSlicer (a
-triangle painted in more than one colour takes the colour covering most of
-it), and standard 3MF material groups, including the app's own exports.
+part's filament slot, paint applied in Bambu Studio or PrusaSlicer (paint
+inside a face, too: its split becomes faces of their own, so none of the
+detail is lost), and standard 3MF material groups, including the app's own
+exports.
 They become the palette, ride through fit and wrap as material tags on the
 solid, and come out on the export. Hide goose over the view frames the part on
 its own so you can paint all round it, and Split by colour exports one
@@ -223,6 +233,7 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/load-model.ts`, `src/obj.ts`, `src/zip-read.ts` read STL, OBJ and 3MF (pure, shared with the app); a 3MF's colours become material tags on the solid
 - `src/threemf-parse.ts` 3MF parts, transforms, filament slots and slicer paint codes; `src/threemf-write.ts` painted 3MF, one mesh or one part per colour
 - `src/split-colours.ts` splits a painted solid into one body per colour
+- `src/paint-tree.ts` paint inside faces as the slicers store it (a split tree per face, its codes, and the bake into real faces); `src/paint-model.ts` the paint tools on it (brush, screen stamps, bucket, undo)
 - `src/prepare.ts` turns a downloaded model into an accessory: orient, scale, centre, fill the hollow underside, add a plug or a puck for the magnet
 - `src/flat.ts` a flat accessory from a traced picture: plate, colour inlays, puck or in-plate mount, flat or standing
 - `src/neck.ts` the press-fit neck band and the fit of an accessory on it

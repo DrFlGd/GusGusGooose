@@ -9,10 +9,11 @@ import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
 import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, fromManifoldTagged, manifold, spinToward, toManifold, toManifoldTagged, type FitProfile, type FitResult, type Placement } from '../fit.ts';
 import { loadModel } from '../load-model.ts';
 import { DEFAULT_PREPARE, holdsMagnet, prepareAccessory, type PrepareOptions, type Side } from '../prepare.ts';
-import { buildFlat, DEFAULT_FLAT, svgDesign, type FlatDesign, type FlatOptions } from '../flat.ts';
+import { buildFlat, cssColor, DEFAULT_FLAT, svgDesign, type FlatDesign, type FlatOptions } from '../flat.ts';
+import { bounds, type Contour, type RGB } from '../vendor/contour.ts';
 import { decodeImage, type Raster } from '../vendor/trace.ts';
 import { parseSvg } from '../vendor/svg.ts';
-import { prepareImage, tracedPreview, type ImageSettings } from './prepare-image.ts';
+import { hex, prepareImage, tracedPreview, type ImageSettings } from './prepare-image.ts';
 import { DEFAULT_NECK, fitOnNeck, makeNeckBand, SLOT_SKIN, type NeckBand, type NeckOptions } from '../neck.ts';
 import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, type Cavity, type GarmentOptions, type WrapOptions } from '../clothing.ts';
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
@@ -22,7 +23,8 @@ import { write3mf, write3mfParts, type Material } from '../threemf-write.ts';
 import { splitByMaterial } from '../split-colours.ts';
 import { PaintState } from './paint.ts';
 import { faceIdMap } from './pick.ts';
-import { facesUnderMask, insidePolygon } from '../paint-fill.ts';
+import { insidePolygon } from '../paint-fill.ts';
+import type { StampView } from '../paint-model.ts';
 
 type V3 = [number, number, number];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -161,6 +163,8 @@ function toGeometry(mesh: IndexedMesh): THREE.BufferGeometry {
 const gooseMaterial = new THREE.MeshStandardMaterial({ color: 0xe9dcc3, roughness: 0.85, flatShading: false });
 const accessoryMaterial = new THREE.MeshStandardMaterial({ color: 0x6fb1ff, roughness: 0.6, transparent: true, opacity: 0.75 });
 const fittedMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
+/** for the faces painted in part, whole, just behind their leaves (see PaintState.backing) */
+const backingMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
 const accessoryColouredMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, transparent: true, opacity: 0.85 });
 
 // ---------- state ----------
@@ -975,7 +979,7 @@ function pointHint() {
 }
 
 function clearFitted() {
-  if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); fittedObject = null; }
+  if (fittedObject) { scene.remove(fittedObject); fittedObject.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); fittedObject = null; }
   fitted = null;
   // the band goes back to the one the options make, with its tabs at full length
   if (fittedBand && neckBand) showBand(neckBand.band);
@@ -994,9 +998,10 @@ function updateExports() {
   for (const id of ['export-3mf', 'export-fitted', 'export-split']) $<HTMLButtonElement>(id).disabled = !paint;
   let info = 'Fit an accessory or make a garment to export it.';
   if (paint) {
-    const used = new Set(paint.faceMaterial).size;
+    const used = paint.materialsUsed().size;
     const what = fitted ? `The ${activePoint === 'neck' ? 'neck' : activePoint.replace('_', ' ')} accessory` : 'The garment';
-    info = `${what}: ${paint.faceMaterial.length.toLocaleString()} faces, ${used} colour${used === 1 ? '' : 's'}.`;
+    info = `${what}: ${paint.count.toLocaleString()} faces, ${used} colour${used === 1 ? '' : 's'}.`;
+    if (paint.trees.size) info += ` ${paint.trees.size.toLocaleString()} face${paint.trees.size === 1 ? ' is' : 's are'} painted in part, which Bambu Studio, OrcaSlicer and PrusaSlicer read from the 3MF.`;
     if (fittedBand) info += ' The neck band is its own part: a second STL, or a second part in the 3MF.';
     if (!fitted && garmentParts) info += ` STL gives ${garmentParts.length} files, one per half.`;
   }
@@ -1007,25 +1012,11 @@ function updateExports() {
 function showFitted(mesh: IndexedMesh, faceMaterial?: Uint8Array) {
   const previous = paint;
   paint = new PaintState(mesh, palette);
-  if (faceMaterial) {
-    paint.faceMaterial.set(faceMaterial);
-    paint.recolor();
-  } else if (previous) {
-    // carry the paint over by nearest old face centroid
-    const oc = previous.centroids, nc = paint.centroids;
-    for (let i = 0; i < paint.faceMaterial.length; i++) {
-      let best = Infinity, bi = 0;
-      for (let j = 0; j < previous.faceMaterial.length; j++) {
-        const dx = oc[j * 3] - nc[i * 3], dy = oc[j * 3 + 1] - nc[i * 3 + 1], dz = oc[j * 3 + 2] - nc[i * 3 + 2];
-        const d = dx * dx + dy * dy + dz * dz;
-        if (d < best) { best = d; bi = j; }
-      }
-      paint.faceMaterial[i] = previous.faceMaterial[bi];
-    }
-    paint.recolor();
-  }
-  if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); }
+  if (faceMaterial) paint.setFaces(faceMaterial);
+  else if (previous?.painted) paint.carryFrom(previous); // by nearest point of the old part's paint
+  if (fittedObject) { scene.remove(fittedObject); fittedObject.traverse((o) => (o as THREE.Mesh).geometry?.dispose()); }
   fittedObject = new THREE.Mesh(paint.geometry, fittedMaterial);
+  fittedObject.add(paint.backingMesh(backingMaterial));
   scene.add(fittedObject);
   idMap = null;
   if (accessoryObject) accessoryObject.visible = false;
@@ -1126,7 +1117,8 @@ $('refine').onclick = async () => {
     // the paint rides along as material runs, so every new face keeps its parent's colour
     const { Manifold } = await manifold();
     const firstID = Manifold.reserveIDs(palette.length);
-    const m = await toManifoldTagged(paint.mesh, paint.faceMaterial, firstID);
+    const baked = paint.baked(); // paint inside faces becomes faces of its own first
+    const m = await toManifoldTagged(baked.mesh, baked.faceMaterial, firstID);
     const refined = fromManifoldTagged(m.refineToLength(len), firstID, palette.length);
     showFitted(refined.mesh, refined.faceMaterial);
     status(`Refined to ${(refined.mesh.triangles.length / 3).toLocaleString()} faces.`);
@@ -1134,19 +1126,29 @@ $('refine').onclick = async () => {
     status(`Refine failed: ${(err as Error).message}`);
   }
 };
+/** Palette index → the slicer's paint state: 0 leaves the base to the object's own filament (1), colour n is filament n + 1. */
+const paintState = (m: number) => (m === 0 ? 0 : m + 1);
+/** The painted part for a 3MF: the mesh with slicer paint codes (paint inside faces kept as is), or, unticked, the paint made into faces. */
+function paintedForExport(): { mesh: IndexedMesh; faceMaterial: Uint8Array; paintCodes?: string[] } {
+  if (!paint) throw new Error('nothing to export');
+  if ($<HTMLInputElement>('export-subtri').checked) return { mesh: paint.mesh, faceMaterial: paint.faceMaterial, paintCodes: paint.paintCodes(paintState) };
+  const b = paint.baked();
+  return { mesh: b.mesh, faceMaterial: b.faceMaterial };
+}
 $('export-3mf').onclick = () => {
   if (!paint) return;
-  const used = new Set(paint.faceMaterial);
+  const used = paint.materialsUsed();
   const names = palette.filter((_, i) => used.has(i)).map((m) => m.name).join(', ');
+  const part = paintedForExport();
   if (fittedBand) {
     // the painted accessory and the band as two parts of one object
-    const parts = [{ name: 'Accessory', mesh: paint.mesh, material: 0, faceMaterial: paint.faceMaterial }, { name: 'Neck band', mesh: fromManifold(fittedBand), material: 0 }];
+    const parts = [{ name: 'Accessory', material: 0, ...part }, { name: 'Neck band', mesh: fromManifold(fittedBand), material: 0 }];
     download(`${exportName()}.3mf`, write3mfParts(parts, palette, `goose ${activePoint} accessory`));
     status(`3MF exported with colours: ${names}, and the neck band as a second part.`);
     return;
   }
-  download(`${exportName()}.3mf`, write3mf(paint.mesh, palette, paint.faceMaterial, `goose ${activePoint} accessory`));
-  status(`3MF exported with colours: ${names}. Map them to filaments in your slicer.`);
+  download(`${exportName()}.3mf`, write3mf(part.mesh, palette, part.faceMaterial, `goose ${activePoint} accessory`, part.paintCodes));
+  status(`3MF exported with colours: ${names}. Map them to filaments in your slicer${part.paintCodes ? ` (filament ${palette.length > 1 ? `1 to ${palette.length}` : '1'} in palette order)` : ''}.`);
 };
 /** The fitted part's file name: the garment's when one was made, else the accessory's point. */
 const exportName = () => (garmentName && !fitted ? garmentName : `accessory.${activePoint}.fitted`);
@@ -1158,7 +1160,8 @@ $('export-split').onclick = async () => {
   await new Promise((r) => setTimeout(r, 20));
   try {
     const t0 = performance.now();
-    const r = await splitByMaterial(paint.mesh, paint.faceMaterial, palette.length, { depth });
+    const baked = paint.baked();
+    const r = await splitByMaterial(baked.mesh, baked.faceMaterial, palette.length, { depth });
     const parts = r.parts.map((p) => ({ name: palette[p.material].name, mesh: p.mesh, material: p.material }));
     if (fittedBand) parts.push({ name: 'Neck band', mesh: fromManifold(fittedBand), material: 0 });
     download(`${exportName()}.parts.3mf`, write3mfParts(parts, palette, `goose ${activePoint} accessory`));
@@ -1291,21 +1294,26 @@ function paintAt(e: PointerEvent) {
 }
 function updatePaintInfo() {
   if (!paint) return;
-  let painted = 0;
-  for (const m of paint.faceMaterial) if (m !== 0) painted++;
-  $('paint-info').textContent = `${paint.faceMaterial.length.toLocaleString()} faces, ${painted.toLocaleString()} painted.`;
+  const split = paint.trees.size;
+  $('paint-info').textContent = `${paint.count.toLocaleString()} faces, ${paint.paintedFaces.toLocaleString()} painted` + (split ? `, ${split.toLocaleString()} of them in part.` : '.');
+  updateExports();
 }
 
 // ---------- paint tools: bucket, corners, text ----------
-type PaintTool = 'brush' | 'bucket' | 'corners' | 'text';
+type PaintTool = 'brush' | 'bucket' | 'corners' | 'text' | 'image';
 let paintTool: PaintTool = 'brush';
 const overlay = $<HTMLCanvasElement>('overlay');
 let corners: [number, number][] = [];
 let hover: [number, number] | null = null;
+interface StampLayer { color: RGB; contours: Contour[]; rule: CanvasFillRule; path: Path2D }
+/** The picture, as layers in painting order (later ones on top), in its own units with y up. */
+let stamp: { name: string; width: number; cx: number; cy: number; layers: StampLayer[] } | null = null;
+let stampRaster: Raster | null = null;
+let stampSettings: Partial<ImageSettings> = {};
 function setPaintTool(t: PaintTool) {
   paintTool = t;
   for (const b of document.querySelectorAll<HTMLButtonElement>('#paint-tools button')) b.classList.toggle('active', b.dataset.tool === t);
-  for (const x of ['brush', 'bucket', 'corners', 'text']) $(`tool-${x}`).classList.toggle('hidden', x !== t);
+  for (const x of ['brush', 'bucket', 'corners', 'text', 'image']) $(`tool-${x}`).classList.toggle('hidden', x !== t);
   if (t !== 'corners') clearCorners();
   drawOverlay();
 }
@@ -1342,16 +1350,52 @@ function pixelsPerMm(f: number): number {
   const dist = Math.max(1, camera.position.distanceTo(p));
   return (view.clientHeight / 2) / (dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
 }
-/** Paints the visible faces under a screen mask, growing over faces too small to own a pixel. */
-function paintUnderMask(inMask: (x: number, y: number) => boolean, what: string) {
+/** A screen mask as labels: `activeMaterial` where `inMask`, else nothing. */
+function maskLabels(inMask: (x: number, y: number) => boolean): Int16Array {
+  const w = view.clientWidth, h = view.clientHeight, labels = new Int16Array(w * h).fill(-1);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (inMask(x, y)) labels[y * w + x] = activeMaterial;
+  return labels;
+}
+/** Labels from a canvas drawn over the view: `material` where its alpha passes half, others left as they are. */
+function canvasLabels(ctx: CanvasRenderingContext2D, labels: Int16Array, material: number) {
+  const w = view.clientWidth, h = view.clientHeight;
+  const data = ctx.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < w * h; i++) if (data[i * 4 + 3] > 127) labels[i] = material;
+}
+/**
+ * Paints a screen stamp (a palette index per pixel, −1 for none) onto the
+ * faces that show under it, splitting faces where its colours change, so it
+ * needs no Refine. Faces too small to own a pixel come along from the ring
+ * around the ones that do.
+ */
+function paintStamp(labels: Int16Array, what: string) {
   const map = faceMap();
   if (!map || !paint) return;
-  const faces = facesUnderMask(map.ids, map.w, map.h, inMask, paint.faceMaterial.length);
-  const grown = paint.grow(faces, (g) => { if (!frontFacing(g)) return false; const [x, y] = centroidOnScreen(g); return inMask(x, y); });
+  const { ids, w, h } = map;
+  const p = paint;
+  const seen = new Set<number>();
+  for (let i = 0; i < w * h; i++) {
+    if (labels[i] < 0) continue;
+    // the pixel and its neighbours, so faces along the stamp's edge are in too
+    for (const j of [i, i - 1, i + 1, i - w, i + w]) { const f = ids[j]; if (j >= 0 && j < w * h && f >= 0 && f < p.count) seen.add(f); }
+  }
+  const adj = p.faceAdjacency;
+  const candidates = new Set<number>();
+  for (const f of seen) {
+    if (frontFacing(f)) candidates.add(f);
+    for (let k = 0; k < 3; k++) { const g = adj[f * 3 + k]; if (g >= 0 && !seen.has(g) && frontFacing(g)) candidates.add(g); }
+  }
+  const v = new THREE.Vector3();
+  const stampView: StampView = {
+    project: (x, y, z) => { v.set(x, y, z).project(camera); return [((v.x + 1) / 2) * w, ((1 - v.y) / 2) * h]; },
+    visible: (f, x, y) => { const g = ids[Math.floor(y) * w + Math.floor(x)]; return g === f || (g >= 0 && p.touches(f, g)); },
+  };
   paint.snapshot();
-  const n = paint.paintFaces(grown, activeMaterial);
+  const t0 = performance.now();
+  const n = paint.paintLabels({ labels, width: w, height: h }, stampView, candidates);
   updatePaintInfo();
-  status(n ? `${what}: ${n.toLocaleString()} faces painted ${palette[activeMaterial].name}.` : `${what}: nothing under it. Refine the mesh for finer faces, or zoom in.`);
+  const ms = performance.now() - t0;
+  status(n ? `${what}: ${n.toLocaleString()} faces painted${paint.trees.size ? ', split where the edge crosses them' : ''} (${ms < 1000 ? `${ms.toFixed(0)} ms` : `${(ms / 1000).toFixed(1)} s`}).` : `${what}: nothing under it. Point at the part, or zoom in.`);
 }
 const textOptions = () => ({
   text: $<HTMLInputElement>('text-value').value,
@@ -1382,13 +1426,14 @@ function stampText(x: number, y: number) {
   c.width = w; c.height = h;
   const ctx = c.getContext('2d')!;
   placeText(ctx, x, y, o.size * pixelsPerMm(f), 'fill');
-  const data = ctx.getImageData(0, 0, w, h).data;
-  paintUnderMask((px, py) => data[(py * w + px) * 4 + 3] > 127, `"${o.text}"`);
+  const labels = new Int16Array(w * h).fill(-1);
+  canvasLabels(ctx, labels, activeMaterial);
+  paintStamp(labels, `"${o.text}"`);
 }
 function applyCorners() {
   if (corners.length < 3) { status('Click at least three corners first.'); return; }
   const poly = corners;
-  paintUnderMask((x, y) => insidePolygon(poly, x, y), `${poly.length} corners`);
+  paintStamp(maskLabels((x, y) => insidePolygon(poly, x + 0.5, y + 0.5)), `${poly.length} corners`);
   clearCorners();
 }
 function clearCorners() {
@@ -1424,8 +1469,113 @@ function drawOverlay() {
     const f = faceAt(hover[0], hover[1]);
     placeText(ctx, hover[0], hover[1], textOptions().size * pixelsPerMm(f), 'stroke');
   }
+  if (paintTool === 'image' && hover && stamp) {
+    const f = faceAt(hover[0], hover[1]);
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    placeStamp(ctx, hover[0], hover[1], pixelsPerMm(f), (layer) => { ctx.fillStyle = hex(layer.color); ctx.fill(layer.path, layer.rule); });
+    ctx.restore();
+    // the outline, so it shows on a part of the same colour
+    placeStamp(ctx, hover[0], hover[1], pixelsPerMm(f), (layer, scale) => { ctx.lineWidth = 1.2 / scale; ctx.strokeStyle = '#f2b84b'; ctx.stroke(layer.path); });
+  }
 }
-for (const id of ['text-value', 'text-size', 'text-angle', 'text-font']) $<HTMLInputElement>(id).addEventListener('input', drawOverlay);
+
+// ---------- image stamp: a picture painted onto the part as the camera sees it ----------
+function setStamp(name: string, layers: Omit<StampLayer, 'path'>[]) {
+  const all = layers.flatMap((l) => l.contours);
+  if (!all.length) throw new Error('nothing left to stamp');
+  const b = bounds(all);
+  stamp = {
+    name, width: Math.max(1e-6, b.maxX - b.minX), cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2,
+    layers: layers.map((l) => {
+      const path = new Path2D();
+      for (const c of l.contours) { for (let i = 0; i < c.length; i += 2) (i ? path.lineTo(c[i], c[i + 1]) : path.moveTo(c[i], c[i + 1])); path.closePath(); }
+      return { ...l, path };
+    }),
+  };
+  $('stamp-preview').replaceChildren(tracedPreview({ width: stamp.width, height: b.maxY - b.minY, regions: stamp.layers }));
+  $<HTMLButtonElement>('stamp-adjust').disabled = !stampRaster;
+  const colours = new Set(stamp.layers.map((l) => hex(l.color))).size;
+  $('stamp-info').textContent = `${name}: ${colours} colour${colours === 1 ? '' : 's'}. Move over the part to place it, click to paint. Right-drag to turn the view.`;
+  setPaintTool('image');
+}
+/** Draws the stamp's layers centred on a screen point, `pxPerMm` at the part's depth there. */
+function placeStamp(ctx: CanvasRenderingContext2D, x: number, y: number, pxPerMm: number, draw: (layer: StampLayer, scale: number) => void) {
+  if (!stamp) return;
+  const scale = (Number($<HTMLInputElement>('stamp-width').value) * pxPerMm) / stamp.width; // screen px per picture unit
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(THREE.MathUtils.degToRad(-Number($<HTMLInputElement>('stamp-angle').value)));
+  ctx.scale(scale, -scale); // the picture's y is up
+  ctx.translate(-stamp.cx, -stamp.cy);
+  for (const layer of stamp.layers) draw(layer, scale);
+  ctx.restore();
+}
+/** The palette entry for a colour: the one already that colour, or a new one. */
+function paletteIndexOf(color: string): number {
+  const i = palette.findIndex((m) => m.color.toLowerCase() === color.toLowerCase());
+  if (i >= 0) return i;
+  palette.push({ name: `Image ${palette.filter((m) => /^Image \d+$/.test(m.name)).length + 1}`, color });
+  return palette.length - 1;
+}
+function stampImage(x: number, y: number) {
+  if (!stamp) { status('Choose a picture first.'); return; }
+  const f = faceAt(x, y);
+  if (f < 0) { status('Point at the part to stamp the picture on it.'); return; }
+  const w = view.clientWidth, h = view.clientHeight;
+  const one = $<HTMLInputElement>('stamp-one').checked;
+  const before = palette.length;
+  const materials = stamp.layers.map((l) => (one ? activeMaterial : paletteIndexOf(hex(l.color))));
+  if (palette.length !== before) renderPalette();
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  const labels = new Int16Array(w * h).fill(-1);
+  const ppm = pixelsPerMm(f);
+  stamp.layers.forEach((layer, i) => {
+    ctx.clearRect(0, 0, w, h);
+    placeStamp(ctx, x, y, ppm, (l, _scale) => { if (l === layer) { ctx.fillStyle = '#fff'; ctx.fill(l.path, l.rule); } });
+    canvasLabels(ctx, labels, materials[i]);
+  });
+  paintStamp(labels, stamp.name);
+}
+async function loadStamp(file: File) {
+  try {
+    if (/\.svg$/i.test(file.name)) {
+      const doc = parseSvg(await file.text()); // y already up
+      const shapes = doc.shapes.filter((sh) => sh.fill !== 'none');
+      if (!shapes.length) throw new Error('no filled shapes in the SVG');
+      stampRaster = null; stampSettings = {};
+      setStamp(file.name, shapes.map((sh) => ({ color: cssColor(sh.fill ?? '#000000'), contours: sh.contours, rule: sh.fillRule })));
+    } else {
+      status(`Opening ${file.name}…`);
+      const raster = await decodeImage(file);
+      const prepared = await prepareImage(raster, file.name, stampSettings, { title: 'Prepare the picture to paint' });
+      if (!prepared) { status(`${file.name} was not used.`); return; }
+      stampRaster = raster; stampSettings = prepared.settings;
+      setStamp(file.name, prepared.regions.map((r) => ({ color: r.color, contours: r.contours, rule: 'evenodd' as CanvasFillRule })));
+    }
+    status(`${file.name} is ready: click the part to paint it.`);
+  } catch (err) {
+    status(`${file.name}: ${(err as Error).message}`);
+  }
+}
+$<HTMLInputElement>('stamp-file').onchange = async (e) => {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (file) await loadStamp(file);
+  input.value = '';
+};
+$('stamp-adjust').onclick = async () => {
+  if (!stampRaster || !stamp) return;
+  const prepared = await prepareImage(stampRaster, stamp.name, stampSettings, { title: 'Prepare the picture to paint' });
+  if (!prepared) return;
+  stampSettings = prepared.settings;
+  setStamp(stamp.name, prepared.regions.map((r) => ({ color: r.color, contours: r.contours, rule: 'evenodd' as CanvasFillRule })));
+};
+for (const id of ['stamp-width', 'stamp-angle', 'stamp-width-num', 'stamp-angle-num']) $<HTMLInputElement>(id).addEventListener('input', drawOverlay);
+
+for (const id of ['text-value', 'text-size', 'text-angle', 'text-font', 'text-size-num', 'text-angle-num']) $<HTMLInputElement>(id).addEventListener('input', drawOverlay);
 renderer.domElement.addEventListener('pointerleave', () => { hover = null; drawOverlay(); });
 renderer.domElement.addEventListener('dblclick', (e) => {
   if (tab !== 'paint' || paintTool !== 'corners') return;
@@ -1460,7 +1610,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (painting) paintAt(e);
-  if (tab === 'paint' && (paintTool === 'text' || paintTool === 'corners')) { hover = local(e); drawOverlay(); }
+  if (tab === 'paint' && (paintTool === 'text' || paintTool === 'corners' || paintTool === 'image')) { hover = local(e); drawOverlay(); }
 });
 window.addEventListener('pointerup', () => { painting = false; });
 
@@ -1639,10 +1789,14 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (tab === 'paint' && e.button === 0 && paint && fittedObject) {
     const [x, y] = local(e);
     if (paintTool === 'bucket') {
-      const f = faceAt(x, y);
-      if (f < 0) { status('Click on the part to fill a region.'); return; }
+      // the drawn triangle under the cursor says which face, and which piece of it when it is painted in part
+      const rect = renderer.domElement.getBoundingClientRect();
+      raycaster.setFromCamera(new THREE.Vector2((x / rect.width) * 2 - 1, -(y / rect.height) * 2 + 1), camera);
+      const hit = raycaster.intersectObject(fittedObject)[0];
+      const t = hit?.faceIndex ?? -1;
+      if (t < 0 || paint.triFace[t] < 0) { status('Click on the part to fill a region.'); return; }
       paint.snapshot();
-      const n = paint.bucket(f, activeMaterial, Number($<HTMLInputElement>('bucket-angle').value));
+      const n = paint.bucket(paint.triFace[t], paint.triLeaf[t], activeMaterial, Number($<HTMLInputElement>('bucket-angle').value));
       updatePaintInfo();
       status(n ? `Filled ${n.toLocaleString()} faces ${palette[activeMaterial].name}.` : 'That region is already this colour.');
     } else if (paintTool === 'corners') {
@@ -1652,6 +1806,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
       drawOverlay();
     } else if (paintTool === 'text') {
       stampText(x, y);
+    } else if (paintTool === 'image') {
+      stampImage(x, y);
     }
     return;
   }

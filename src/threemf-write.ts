@@ -1,7 +1,10 @@
 // Writes a minimal standard 3MF: one mesh object, a base-material group of
 // colours, and a material index on every triangle. Slicers (Bambu Studio,
 // PrusaSlicer, OrcaSlicer) read those as colour regions for multi-filament
-// printing. Pure: no Node APIs, so it runs in the browser too.
+// printing. Given paint codes, each triangle also carries the slicers' own
+// paint (Bambu/Orca `paint_color`, PrusaSlicer `slic3rpe:mmu_segmentation`),
+// which can colour parts of a triangle; the material index is then the
+// colour covering most of it. Pure: no Node APIs, so it runs in the browser too.
 
 import type { IndexedMesh } from './stl.ts';
 
@@ -11,15 +14,21 @@ export interface Material {
   color: string;
 }
 
+const MODEL_OPEN = '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:slic3rpe="http://schemas.slic3r.org/3mf/2017/06">\n';
+
+/** A triangle's slicer paint attributes ('' when it has no paint code). */
+const paintAttrs = (code: string | undefined) => (code ? ` paint_color="${code}" slic3rpe:mmu_segmentation="${code}"` : '');
+
 /**
  * `faceMaterial[i]` is the index into `materials` for triangle i (0 = the
- * first material). Returns the bytes of a .3mf file.
+ * first material); `paintCodes[i]`, when given, is triangle i's slicer paint
+ * code ('' for none). Returns the bytes of a .3mf file.
  */
-export function write3mf(mesh: IndexedMesh, materials: Material[], faceMaterial: Uint8Array, name = 'accessory'): Uint8Array {
+export function write3mf(mesh: IndexedMesh, materials: Material[], faceMaterial: Uint8Array, name = 'accessory', paintCodes?: string[]): Uint8Array {
   const P = mesh.positions, T = mesh.triangles;
   const parts: string[] = [];
   parts.push('<?xml version="1.0" encoding="UTF-8"?>\n');
-  parts.push('<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n');
+  parts.push(MODEL_OPEN);
   parts.push(` <metadata name="Title">${escapeXml(name)}</metadata>\n`);
   parts.push(' <metadata name="Application">Gus Gus Goose fitter</metadata>\n');
   parts.push(' <resources>\n  <basematerials id="1">\n');
@@ -30,9 +39,10 @@ export function write3mf(mesh: IndexedMesh, materials: Material[], faceMaterial:
   parts.push('    </vertices>\n    <triangles>\n');
   for (let i = 0; i < T.length; i += 3) {
     const m = faceMaterial[i / 3] ?? 0;
+    const paint = paintAttrs(paintCodes?.[i / 3]);
     parts.push(m === 0
-      ? `     <triangle v1="${T[i]}" v2="${T[i + 1]}" v3="${T[i + 2]}" />\n`
-      : `     <triangle v1="${T[i]}" v2="${T[i + 1]}" v3="${T[i + 2]}" pid="1" p1="${m}" />\n`);
+      ? `     <triangle v1="${T[i]}" v2="${T[i + 1]}" v3="${T[i + 2]}"${paint} />\n`
+      : `     <triangle v1="${T[i]}" v2="${T[i + 1]}" v3="${T[i + 2]}" pid="1" p1="${m}"${paint} />\n`);
   }
   parts.push('    </triangles>\n   </mesh>\n  </object>\n </resources>\n <build>\n  <item objectid="2" />\n </build>\n</model>\n');
   return packageOf(new TextEncoder().encode(parts.join('')));
@@ -45,6 +55,8 @@ export interface MeshPart {
   material: number;
   /** per-triangle materials, for a painted part; triangles of the part's own `material` are left plain */
   faceMaterial?: Uint8Array;
+  /** per-triangle slicer paint codes, as for `write3mf` */
+  paintCodes?: string[];
 }
 
 /**
@@ -56,7 +68,7 @@ export interface MeshPart {
 export function write3mfParts(parts: MeshPart[], materials: Material[], name = 'accessory'): Uint8Array {
   const out: string[] = [];
   out.push('<?xml version="1.0" encoding="UTF-8"?>\n');
-  out.push('<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n');
+  out.push(MODEL_OPEN);
   out.push(` <metadata name="Title">${escapeXml(name)}</metadata>\n`);
   out.push(' <metadata name="Application">Gus Gus Goose fitter</metadata>\n');
   out.push(' <resources>\n  <basematerials id="1">\n');
@@ -69,9 +81,10 @@ export function write3mfParts(parts: MeshPart[], materials: Material[], name = '
     out.push('    </vertices>\n    <triangles>\n');
     for (let k = 0; k < T.length; k += 3) {
       const m = part.faceMaterial?.[k / 3];
+      const paint = paintAttrs(part.paintCodes?.[k / 3]);
       out.push(m === undefined || m === part.material
-        ? `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" />\n`
-        : `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" pid="1" p1="${m}" />\n`);
+        ? `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}"${paint} />\n`
+        : `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" pid="1" p1="${m}"${paint} />\n`);
     }
     out.push('    </triangles>\n   </mesh>\n  </object>\n');
   });

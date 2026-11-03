@@ -20,7 +20,7 @@ export interface ColourPart {
 export interface SplitResult {
   /** the base first, then one part per painted colour, in material order; colours with no faces are left out */
   parts: ColourPart[];
-  /** which material is the base: the one with the most faces unless given */
+  /** which material is the base: the one covering the most surface unless given */
   base: number;
   warnings: string[];
 }
@@ -28,7 +28,7 @@ export interface SplitResult {
 export interface SplitOptions {
   /** how deep each colour reaches into the part, mm (default 1.2, a few layers) */
   depth?: number;
-  /** the material that keeps everything not covered by another colour's skin; default the one with the most faces */
+  /** the material that keeps everything not covered by another colour's skin; default the one covering the most surface */
   base?: number;
 }
 
@@ -37,8 +37,18 @@ export async function splitByMaterial(mesh: IndexedMesh, faceMaterial: Uint8Arra
   const depth = opts.depth ?? 1.2;
   const n = mesh.triangles.length / 3;
   const counts = new Array<number>(materialCount).fill(0);
-  for (let t = 0; t < n; t++) if (faceMaterial[t] < materialCount) counts[faceMaterial[t]]++;
-  const base = opts.base ?? counts.indexOf(Math.max(...counts));
+  const areas = new Array<number>(materialCount).fill(0);
+  const P = mesh.positions, T = mesh.triangles;
+  for (let t = 0; t < n; t++) {
+    const m = faceMaterial[t];
+    if (m >= materialCount) continue;
+    counts[m]++;
+    const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    areas[m] += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+  }
+  // the colour covering most of the surface (not the most faces: paint inside faces makes many small ones)
+  const base = opts.base ?? areas.indexOf(Math.max(...areas));
   const warnings: string[] = [];
   const solid = await toManifold(mesh);
   const skins: { material: number; solid: ManifoldT }[] = [];

@@ -392,6 +392,7 @@
             <button data-tool="bucket" title="Click a region to fill it">Bucket</button>
             <button data-tool="corners" title="Click corners, fill inside">Corners</button>
             <button data-tool="text" title="Stamp text">Text</button>
+            <button data-tool="image" title="Stamp a picture">Image</button>
           </div>
           <div id="tool-brush" class="tool">
             <div class="slider">
@@ -434,7 +435,24 @@
                 <option value="bold 1px monospace">Mono, bold</option>
               </select>
             </div>
-            <p class="small muted">Move over the part to preview, click to stamp as seen from the camera. Refine the mesh first so the letters have faces to land on: about 0.5 mm for 8 mm letters.</p>
+            <p class="small muted">Move over the part to preview, click to stamp as seen from the camera. Faces are split along the letters' edges, so there is no need to refine first.</p>
+          </div>
+          <div id="tool-image" class="tool hidden">
+            <div id="stamp-preview" class="image-preview checker"><div class="image-empty">No picture yet<br /><span class="muted small">PNG, JPG, WebP or SVG</span></div></div>
+            <div class="row">
+              <label class="btn primary file-btn"><input type="file" id="stamp-file" accept="image/*,.svg" />Choose picture…</label>
+              <button id="stamp-adjust" disabled title="Background, colours, cleanup and exposure">Adjust…</button>
+            </div>
+            <div class="slider">
+              <div class="slider-head"><span>Width</span><span class="val"><input type="number" id="stamp-width-num" step="0.5" min="2" max="120" /><span class="unit">mm</span></span></div>
+              <input type="range" id="stamp-width" min="2" max="120" step="0.5" value="20" />
+            </div>
+            <div class="slider">
+              <div class="slider-head"><span>Angle</span><span class="val"><input type="number" id="stamp-angle-num" step="5" min="-180" max="180" /><span class="unit">°</span></span></div>
+              <input type="range" id="stamp-angle" min="-180" max="180" step="5" value="0" />
+            </div>
+            <label class="check"><input type="checkbox" id="stamp-one" /> All of it in the highlighted colour</label>
+            <p id="stamp-info" class="small muted">Choose a picture, move over the part to see where it goes, click to paint it on as seen from the camera. Its colours are added to the palette.</p>
           </div>
           <div class="row">
             <button id="undo">Undo</button>
@@ -444,6 +462,7 @@
 
         <div class="step">
           <h2>Mesh and view</h2>
+          <p class="small muted">Every tool paints inside faces, splitting them where a colour edge crosses, the way Bambu Studio paints. Refine is only needed for a smoother shape.</p>
           <div class="field"><span>Refine: split edges longer than</span><span class="val"><input type="number" id="refine-len" step="0.25" value="1" /><span class="unit">mm</span></span></div>
           <div class="row"><button id="refine">Refine mesh</button></div>
           <p id="paint-info" class="small muted"></p>
@@ -508,10 +527,11 @@
           <button id="export-3mf" class="primary export-btn" disabled><span>3MF with colours</span><small>Painted regions map to filaments in Bambu Studio, PrusaSlicer, OrcaSlicer</small></button>
           <button id="export-fitted" class="export-btn" disabled><span>STL</span><small>One colour; split garments give one file per half</small></button>
         </div>
+        <label class="check small"><input type="checkbox" id="export-subtri" checked /> Paint inside faces stays slicer paint (Bambu Studio, OrcaSlicer, PrusaSlicer can keep editing it). Untick to cut it into faces of its own instead.</label>
         <p id="export-info" class="small muted">Fit an accessory or make a garment to export it.</p>
         <details id="split-details">
           <summary>Split by colour</summary>
-          <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one with the most faces).</p>
+          <p class="small muted">One body per colour in a single 3MF, for slicers that want parts rather than paint: each colour becomes a skin this deep under its faces and the rest stays with the base colour (the one covering most of the surface).</p>
           <div class="field"><span>Skin depth</span><span class="val"><input type="number" id="split-depth" step="0.2" min="0.4" value="1.2" /><span class="unit">mm</span></span></div>
           <div class="row">
             <button id="export-split" disabled>Export one part per colour</button>

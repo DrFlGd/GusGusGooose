@@ -9,7 +9,8 @@
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import { parseStl, type IndexedMesh } from './stl.ts';
 import { parseObj } from './obj.ts';
-import { parse3mfProject, type Part } from './threemf-parse.ts';
+import { parse3mfProject, transformMesh, type Part } from './threemf-parse.ts';
+import { bakePaint, cloneTree, forEachLeaf, type PaintNode } from './paint-tree.ts';
 import { fromManifold, manifold, toManifold, toManifoldTagged } from './fit.ts';
 import { voxelRebuild, type RepairOptions } from './repair.ts';
 import type { Material } from './threemf-write.ts';
@@ -34,7 +35,7 @@ export interface LoadedModel {
    */
   materials?: Material[];
   firstID?: number;
-  /** the material with the most faces: what faces made by a cut should take */
+  /** the material covering most of the surface: what faces made by a cut should take */
   fallback?: number;
 }
 
@@ -83,14 +84,34 @@ export async function loadModel(name: string, data: ArrayBuffer | Uint8Array, op
       triangles += n;
       if (p.kind === 'negative') { holes.push(await solidOf(p.mesh, opts, repaired)); continue; }
       let tags: Parameters<typeof solidOf>[3];
+      let mesh = p.mesh;
       if (materials) {
         const own = slots.indexOf(p.extruder ?? 1);
-        const faceMaterial = new Uint8Array(n).fill(own);
+        let faceMaterial = new Uint8Array(n).fill(own);
         if (p.faceExtruder) for (let t = 0; t < n; t++) if (p.faceExtruder[t]) faceMaterial[t] = slots.indexOf(p.faceExtruder[t]);
-        for (const m of faceMaterial) faceCounts[m]++;
+        if (p.paintTrees?.size) {
+          // paint inside triangles: the leaves become real triangles (on the part's own mesh, whose
+          // vertex order the codes refer to, then moved into place), so none of the detail is lost
+          const trees = new Map<number, PaintNode>();
+          for (const [t, tree] of p.paintTrees) {
+            const c = cloneTree(tree);
+            forEachLeaf(c, (l) => { l.material = l.material ? slots.indexOf(l.material) : own; });
+            trees.set(t, c);
+          }
+          const baked = bakePaint(p.local, faceMaterial, trees);
+          mesh = transformMesh(baked.mesh, p.transform);
+          faceMaterial = baked.faceMaterial;
+        }
+        // weigh by area, so paint split into many small faces does not outvote the part's own colour
+        const P = mesh.positions, T = mesh.triangles;
+        for (let t = 0; t < faceMaterial.length; t++) {
+          const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
+          const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+          faceCounts[faceMaterial[t]] += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+        }
         tags = { faceMaterial, firstID, whole: own };
       }
-      solids.push(await solidOf(p.mesh, opts, repaired, tags));
+      solids.push(await solidOf(mesh, opts, repaired, tags));
     }
     if (!solids.length) throw new Error('the 3MF has no printable parts');
     let solid = solids.length === 1 ? solids[0] : Manifold.union(solids);
@@ -118,6 +139,7 @@ function usedSlots(parts: Part[]): number[] {
     if (p.kind === 'negative') continue;
     if (p.extruder) { slots.add(p.extruder); any = true; }
     if (p.faceExtruder) { any = true; for (const s of p.faceExtruder) if (s) slots.add(s); }
+    if (p.paintTrees) for (const tree of p.paintTrees.values()) forEachLeaf(tree, (l) => { if (l.material) slots.add(l.material); });
   }
   if (!any) return [];
   for (const p of parts) if (p.kind === 'normal' && !p.extruder) slots.add(1);

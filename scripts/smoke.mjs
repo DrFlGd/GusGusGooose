@@ -122,9 +122,8 @@ await page.mouse.move(ex, ey, { steps: 12 });
 await page.mouse.up();
 const paintedFaces = await page.evaluate(() => document.getElementById('paint-info').textContent);
 console.log('3d. after stroke:', paintedFaces);
-// the other paint tools on the head puck, refined first so letters have faces to land on
-await page.click('#refine');
-await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Refined'), null, { timeout: 60000 });
+// the brush paints inside faces: the puck's big flat top is split along the stroke's edge, not refined first
+if (!/in part/.test(paintedFaces)) throw new Error('the stroke did not paint inside faces');
 const mid = [(sx + ex) / 2, (sy + ey) / 2];
 await page.evaluate(() => window.__goose.setPaintTool('bucket'));
 await page.evaluate(() => { document.querySelector('#palette .swatch:nth-child(4)').click(); });
@@ -153,11 +152,44 @@ await page.waitForFunction(() => document.getElementById('status').textContent.s
 console.log('3j. text:', await status());
 await page.screenshot({ path: join(out, '3j-tools.png') });
 for (const line of [await page.evaluate(() => document.getElementById('status').textContent)]) if (/nothing under/.test(line)) throw new Error('text stamp painted nothing');
+// a picture stamp: a two-colour SVG (a green square with a white dot), its colours joining the palette
+const stampSvg = join(out, 'stamp.svg');
+writeFileSync(stampSvg, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="#1e9e4a"/><circle cx="50" cy="50" r="25" fill="#fafafa"/></svg>');
+const swatchesBefore = await page.locator('#palette .swatch').count();
+await page.evaluate(() => window.__goose.setPaintTool('image'));
+await page.setInputFiles('#stamp-file', stampSvg);
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('stamp.svg is ready'), null, { timeout: 10000 });
+await page.fill('#stamp-width', '6');
+await page.dispatchEvent('#stamp-width', 'input');
+const spot = await page.evaluate(() => {
+  const h = window.__goose.profile.points.head;
+  const top = h.center.map((c, i) => c + h.axis[i] * 6);
+  return window.__goose.toScreen([top[0] + 3, top[1] - 3, top[2]]);
+});
+await page.mouse.move(spot[0] + 1, spot[1] + 1);
+await page.screenshot({ path: join(out, '3k-stamp-preview.png') });
+await page.mouse.click(spot[0], spot[1]);
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('stamp.svg:'), null, { timeout: 15000 });
+const swatchesAfter = await page.locator('#palette .swatch').count();
+console.log('3k. image:', await status(), `palette ${swatchesBefore} → ${swatchesAfter}`);
+if (/nothing under/.test(await status()) || swatchesAfter !== swatchesBefore + 2) throw new Error('the picture stamp did not paint its two colours');
+await page.screenshot({ path: join(out, '3k-stamped.png') });
 await page.evaluate(() => window.__goose.setPaintTool('brush'));
 const [download] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-3mf')]);
 const threemf = join(out, 'accessory.3mf');
 await download.saveAs(threemf);
 console.log('3e.', await status(), '→', threemf);
+// the export carries the slicer paint, with codes that split faces (more than one hex digit)
+{
+  const { readFileSync } = await import('node:fs');
+  const { unzip } = await import('../src/zip-read.ts');
+  const entries = await unzip(readFileSync(threemf));
+  const model = new TextDecoder().decode([...entries].find(([n]) => n.endsWith('.model'))[1]);
+  const codes = [...model.matchAll(/paint_color="([0-9A-F]+)"/g)].map((m) => m[1]);
+  const split = codes.filter((c) => c.length > 2).length;
+  console.log(`3e2. ${codes.length} painted faces in the 3MF, ${split} split`);
+  if (!split) throw new Error('the 3MF has no paint inside faces');
+}
 await page.screenshot({ path: join(out, '3c-painted.png') });
 // focus view: the goose goes, the camera frames the part; off again and the goose is back
 await page.click('#focus');
@@ -172,6 +204,11 @@ await page.click('#split-details summary');
 const [splitDl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('#export-split')]);
 await page.waitForFunction(() => document.getElementById('split-info').textContent.includes('parts'), null, { timeout: 60000 });
 console.log('3g.', await page.locator('#split-info').textContent(), '→', splitDl.suggestedFilename());
+// Refine still works with paint inside faces: the leaves become faces first
+await page.click('.tabs button[data-tab="paint"]');
+await page.click('#refine');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Refined'), null, { timeout: 60000 });
+console.log('3l.', await status());
 await page.click('.tabs button[data-tab="accessory"]');
 
 // a downloaded model: a 3MF with two parts, dropped in, flipped, scaled to 20 mm wide, with a plug

@@ -118,7 +118,7 @@ test('a 3MF keeps its filament slots and paint as materials through a boolean', 
   const tagged = fromManifoldTagged(m.solid, m.firstID, m.materials.length, 9);
   const count = (fm: Uint8Array) => { const c = [0, 0, 0, 0]; for (const v of fm) c[v === 9 ? 3 : v]++; return c; };
   assert.deepEqual(count(tagged.faceMaterial), [10, 2, 12, 0]);
-  assert.equal(m.fallback, 2, 'the slot with the most faces is the fallback');
+  assert.equal(m.fallback, 2, 'the slot covering the most surface is the fallback');
   // cut the second cube in half: its new faces carry the fallback, the rest keep their colours
   const cut = m.solid.subtract(Manifold.cube([10, 20, 20], false).translate(25, -5, -5));
   const after = fromManifoldTagged(cut, m.firstID, m.materials.length, m.fallback);

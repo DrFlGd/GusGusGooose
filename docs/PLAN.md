@@ -305,6 +305,58 @@ model, and fix the eyes, which still sat a few mm proud. What changed:
   follows that plane plus each ray's difference from it, 0.03 mm out.
   Sections through both eyes show the caps running rim to rim.
 
+## Paint inside faces and image stamps (Jerred, 2026-11-03, night)
+
+Jerred asked for "the mid-triangle painting method" (how Bambu Studio paints:
+colours inside a triangle, without remeshing) and for placing images on the
+model in paint mode.
+
+- **The slicers' format.** Bambu Studio, OrcaSlicer and PrusaSlicer keep
+  paint as a tree per triangle (TriangleSelector): a triangle is split at
+  the midpoints of one, two or three of its sides, each child the same way,
+  each leaf one state (0 = the object's filament, n = filament n). It is
+  stored per triangle as a hex string: 2 bits of split sides, then a leaf's
+  2-bit state (3 means 4 more bits, state − 3) or a split's 2-bit special
+  side and its children last first; bits run least significant first within
+  a nibble, nibbles last first. `src/paint-tree.ts` splits, encodes and
+  decodes exactly that, with the child order of PrusaSlicer's
+  `perform_split`.
+- **Import.** A split code used to be coarsened to its majority colour.
+  Now the tree is kept and baked into real faces before the part becomes a
+  solid: each leaf a face, T-junctions with finer neighbours closed by fans,
+  so the solid stays closed (tested on a sphere with neighbours split to
+  different depths). On the part's own mesh, since the codes refer to its
+  vertex order, then moved into place.
+- **The tools.** `src/paint-model.ts` keeps a colour per face plus the
+  trees. A face is split only across its long sides, as the slicers do,
+  so a sliver does not shatter into ever thinner slivers (a stroke over a
+  fan of 64 thin faces went from 85,000 baked faces to 26,000, and its split
+  by colour from 6.5 s to 1.7 s). The brush splits faces its edge crosses
+  down to 4 % of its radius (0.03 to 0.4 mm); the corners, text and image
+  stamps render a label per
+  screen pixel and split each visible face until a piece lies under one
+  label (a summed table answers that for any box) or is about 1.5 px
+  across; the bucket floods the baked faces and writes back to leaves.
+  Undo shares trees with the live paint and copies one the first time it
+  changes. The viewer (`src/web/paint.ts`) draws leaves in blocks after the
+  mesh's own faces and uploads only the ranges a stroke touched.
+- **Image stamp.** A picture goes through Prepare image (an SVG keeps its
+  fills and paint order); width in mm at the depth under the cursor, angle,
+  a preview over the view, click to paint. Each colour becomes the palette
+  entry of that colour, added as "Image n" when missing, or all of it the
+  highlighted colour.
+- **Export.** The 3MF keeps the mesh and writes each painted face's code as
+  `paint_color` and `slic3rpe:mmu_segmentation`, with the majority colour as
+  its material too; palette colour n is filament n (state 0 for the base).
+  Unticking "Paint inside faces stays slicer paint" bakes it into faces
+  instead. Refine and Split by colour use the baked faces; the split's base
+  colour (and an import's colour for cut faces) is now the one covering the
+  most surface, not the most faces.
+- **Unverified.** No real Bambu file with split paint was at hand, so the
+  split geometry follows PrusaSlicer's source. A test cube with discs
+  crossing its triangles' diagonals is in the project files
+  (`goose/paint-test/`), with a picture of how it should look.
+
 ## Still needed from Jerred
 
 - [ ] The goose base STL with the magnet voids in it, the exact file sliced from. It gets bundled into the app at `goose/goose.stl`.

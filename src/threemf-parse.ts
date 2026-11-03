@@ -5,6 +5,7 @@
 
 import type { IndexedMesh } from './stl.ts';
 import { unzip } from './zip-read.ts';
+import { codeSplits, decodePaint, majority, type PaintNode } from './paint-tree.ts';
 
 export interface Part {
   name: string;
@@ -26,9 +27,12 @@ export interface Part {
    * Per-triangle filament slot painted on in Bambu Studio / PrusaSlicer
    * (`paint_color`), 1-based; 0 = not painted, so the part's own slot. Only
    * present when some triangle is painted. A triangle painted in several
-   * colours (split in the slicer) takes the colour covering most of it.
+   * colours (split in the slicer) takes the colour covering most of it here,
+   * and keeps all of them in `paintTrees`.
    */
   faceExtruder?: Uint8Array;
+  /** triangles painted in several colours: the slicer's split of each (by triangle index), leaves holding slots as in `faceExtruder` */
+  paintTrees?: Map<number, PaintNode>;
 }
 
 export interface Project {
@@ -48,6 +52,7 @@ interface RawObject {
   type: string;
   mesh?: IndexedMesh;
   paint?: Uint8Array;
+  trees?: Map<number, PaintNode>;
   /** the object's material group and index into it (standard 3MF basematerials or colour groups) */
   pid?: string;
   pindex?: number;
@@ -104,7 +109,7 @@ export function projectFromFiles(files: Map<string, string>): Project {
         : o.type === 'other' ? 'negative' : 'normal';
       // a part without its own slot prints in its object's slot; painted parts default to slot 1 like the slicer does
       const extruder = meta?.extruder ?? objectExtruders.get(group) ?? (o.pindex !== undefined ? o.pindex + 1 : o.paint ? 1 : undefined);
-      parts.push({ name: meta?.name ?? `object ${objectId}`, kind, mesh: transformMesh(o.mesh, xf), local: o.mesh, transform: xf, group, extruder, color: extruder ? colours[extruder - 1] : undefined, faceExtruder: o.paint });
+      parts.push({ name: meta?.name ?? `object ${objectId}`, kind, mesh: transformMesh(o.mesh, xf), local: o.mesh, transform: xf, group, extruder, color: extruder ? colours[extruder - 1] : undefined, faceExtruder: o.paint, paintTrees: o.trees });
     }
     for (const c of o.components) visit(c.objectId, c.path ?? path, compose(c.transform, xf));
   };
@@ -132,40 +137,12 @@ export async function parse3mfProject(data: ArrayBuffer | Uint8Array): Promise<P
 /**
  * The filament slot a Bambu Studio / PrusaSlicer `paint_color` code paints a
  * triangle with (1-based; 0 = unpainted), from the slicer's TriangleSelector
- * encoding: the hex digits are stored last-nibble-first, each nibble holds
- * four bits least-significant first, and the bit stream is, per triangle,
- * 2 bits "sides split" then either (unsplit) a 2-bit state with 4 more bits
- * when that state is 3, or (split) a 2-bit special side followed by the
- * children, each encoded the same way. A split triangle takes the slot that
- * covers most of its area (children of one split counted equal).
+ * encoding (see `decodePaint` in paint-tree.ts). A split triangle takes the
+ * slot that covers most of its area.
  */
 export function paintExtruder(code: string): number {
-  if (!code) return 0;
-  const bits: number[] = [];
-  for (let i = code.length - 1; i >= 0; i--) {
-    const d = parseInt(code[i], 16);
-    if (Number.isNaN(d)) return 0;
-    bits.push(d & 1, (d >> 1) & 1, (d >> 2) & 1, (d >> 3) & 1);
-  }
-  let pos = 0;
-  const read = (n: number) => { let v = 0; for (let i = 0; i < n; i++) v |= (bits[pos++] ?? 0) << i; return v; };
-  const area = new Map<number, number>();
-  const walk = (weight: number): void => {
-    if (pos >= bits.length) return;
-    const split = read(2);
-    if (split === 0) {
-      let state = read(2);
-      if (state === 3) state = 3 + read(4);
-      area.set(state, (area.get(state) ?? 0) + weight);
-    } else {
-      read(2); // which side is special; irrelevant for the colour
-      for (let c = 0; c <= split; c++) walk(weight / (split + 1));
-    }
-  };
-  walk(1);
-  let best = 0, bestArea = 0;
-  for (const [state, a] of area) if (a > bestArea) { best = state; bestArea = a; }
-  return best;
+  const tree = decodePaint(code);
+  return tree ? majority(tree) : 0;
 }
 
 function parseObjects(xml: string, groups: Map<string, MaterialGroup>, file: string): RawObject[] {
@@ -183,10 +160,20 @@ function parseObjects(xml: string, groups: Map<string, MaterialGroup>, file: str
       for (const v of meshXml[1].matchAll(/<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"/g)) verts.push(+v[1], +v[2], +v[3]);
       const tris: number[] = [], paint: number[] = [];
       let painted = false;
+      let trees: Map<number, PaintNode> | undefined;
       for (const t of meshXml[1].matchAll(/<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"([^>]*)>/g)) {
         tris.push(+t[1], +t[2], +t[3]);
-        const code = t[4] && t[4].includes('paint_color') ? t[4].match(/paint_color="([0-9A-Fa-f]*)"/)?.[1] : undefined;
-        let slot = code ? paintExtruder(code) : 0;
+        // Bambu Studio and OrcaSlicer write `paint_color`, PrusaSlicer `slic3rpe:mmu_segmentation`; the code is the same
+        const code = t[4] && (t[4].includes('paint_color') || t[4].includes('mmu_segmentation'))
+          ? t[4].match(/(?:paint_color|slic3rpe:mmu_segmentation)="([0-9A-Fa-f]*)"/)?.[1] : undefined;
+        let slot = 0;
+        if (code) {
+          const tree = decodePaint(code);
+          if (tree) {
+            slot = majority(tree);
+            if (codeSplits(code)) { (trees ??= new Map()).set(tris.length / 3 - 1, tree); painted = true; }
+          }
+        }
         if (!slot && t[4] && t[4].includes('p1=')) {
           const ta = attrs(t[4]);
           const pid = ta.pid ?? group;
@@ -197,6 +184,7 @@ function parseObjects(xml: string, groups: Map<string, MaterialGroup>, file: str
       }
       o.mesh = { positions: Float32Array.from(verts), triangles: Uint32Array.from(tris) };
       if (painted) o.paint = Uint8Array.from(paint);
+      if (trees) o.trees = trees;
     }
     for (const c of body.matchAll(/<component\s+([^>]*)\/?>/g)) {
       const ca = attrs(c[1]);
