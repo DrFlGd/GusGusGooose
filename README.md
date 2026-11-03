@@ -13,8 +13,11 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 magnet points, lets you drop an accessory STL on a point with sink, spin
 and slide controls, fits it with one click and exports the STL. The
 Magnet hole tab cuts a new hole where you click, open or embedded with the
-pause height reported, and exports the holed goose. Everything runs in
-the page; nothing is uploaded. `npm run smoke` builds it and drives it
+pause height reported, and exports the holed goose. The Paint tab (after
+a fit) brushes faces with a palette of your filament colours, with Refine
+to split the mesh for finer edges, Fill all and Undo, and exports a 3MF
+whose colour regions the slicer maps to filaments (STL stays for
+single-colour parts). Everything runs in the page; nothing is uploaded. `npm run smoke` builds it and drives it
 headlessly (fit a puck, cut a hole, screenshots in `smoke-out/`); it needs
 Playwright with Chromium available.
 

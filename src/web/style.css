@@ -36,6 +36,11 @@ summary { cursor: pointer; font-size: 13px; }
 button { padding: 8px 10px; background: #30343d; color: var(--text); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
 button.primary { background: var(--accent); color: #1b1d22; border-color: var(--accent); font-weight: 600; }
 button:disabled { opacity: 0.4; cursor: default; }
+#palette { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.swatch { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 12px; }
+.swatch.active { border-color: var(--accent); }
+.swatch input[type="color"] { width: 24px; height: 24px; padding: 0; border: none; background: none; cursor: pointer; }
+.swatch input[type="text"] { width: 70px; margin: 0; padding: 2px 4px; font-size: 12px; }
 #points { list-style: none; padding: 0; margin: 0; }
 #points li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; font-size: 12px; cursor: pointer; }
 #points li.active { border-color: var(--accent); }

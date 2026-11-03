@@ -8,6 +8,8 @@ import { parseStl, serializeStl, type IndexedMesh } from '../stl.ts';
 import { DEFAULT_PROFILE, fitAccessory, frameAt, fromManifold, manifold, toManifold, type FitProfile, type FitResult, type Placement } from '../fit.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
+import { write3mf, type Material } from '../threemf-write.ts';
+import { PaintState } from './paint.ts';
 
 type V3 = [number, number, number];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -56,7 +58,7 @@ function toGeometry(mesh: IndexedMesh): THREE.BufferGeometry {
 
 const gooseMaterial = new THREE.MeshStandardMaterial({ color: 0xe9dcc3, roughness: 0.85, flatShading: false });
 const accessoryMaterial = new THREE.MeshStandardMaterial({ color: 0x6fb1ff, roughness: 0.6, transparent: true, opacity: 0.75 });
-const fittedMaterial = new THREE.MeshStandardMaterial({ color: 0xf2b84b, roughness: 0.6 });
+const fittedMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
 
 // ---------- state ----------
 let gooseMesh: IndexedMesh;
@@ -273,9 +275,37 @@ $<HTMLSelectElement>('point').onchange = (e) => { activePoint = (e.target as HTM
 function clearFitted() {
   if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); fittedObject = null; }
   fitted = null;
+  paint = null;
   $<HTMLButtonElement>('export-fitted').disabled = true;
+  $<HTMLButtonElement>('paint-tab-button').disabled = true;
   $('fit-result').textContent = '';
   if (accessoryObject) accessoryObject.visible = true;
+}
+
+/** Shows `mesh` as the fitted part, with per-face paint colours. */
+function showFitted(mesh: IndexedMesh) {
+  const previous = paint;
+  paint = new PaintState(mesh, palette);
+  if (previous) {
+    // carry the paint over by nearest old face centroid
+    const oc = previous.centroids, nc = paint.centroids;
+    for (let i = 0; i < paint.faceMaterial.length; i++) {
+      let best = Infinity, bi = 0;
+      for (let j = 0; j < previous.faceMaterial.length; j++) {
+        const dx = oc[j * 3] - nc[i * 3], dy = oc[j * 3 + 1] - nc[i * 3 + 1], dz = oc[j * 3 + 2] - nc[i * 3 + 2];
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < best) { best = d; bi = j; }
+      }
+      paint.faceMaterial[i] = previous.faceMaterial[bi];
+    }
+    paint.recolor();
+  }
+  if (fittedObject) { scene.remove(fittedObject); fittedObject.geometry.dispose(); }
+  fittedObject = new THREE.Mesh(paint.geometry, fittedMaterial);
+  scene.add(fittedObject);
+  if (accessoryObject) accessoryObject.visible = false;
+  $<HTMLButtonElement>('paint-tab-button').disabled = false;
+  $('paint-info').textContent = `${(mesh.triangles.length / 3).toLocaleString()} faces.`;
 }
 
 $('fit').onclick = async () => {
@@ -288,9 +318,7 @@ $('fit').onclick = async () => {
     profile.clearance = Number($<HTMLInputElement>('clearance').value);
     const t0 = performance.now();
     fitted = await fitAccessory(gooseManifold, accessoryManifold, profile, placement());
-    fittedObject = new THREE.Mesh(toGeometry(fitted.mesh), fittedMaterial);
-    scene.add(fittedObject);
-    if (accessoryObject) accessoryObject.visible = false;
+    showFitted(fitted.mesh);
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('fit-result').textContent = `Fitted in ${secs} s: ${fitted.volumeBefore.toFixed(0)} → ${fitted.volumeAfter.toFixed(0)} mm³, ${fitted.bodies} body.` + (fitted.warnings.length ? ` Warnings: ${fitted.warnings.join('; ')}` : '');
     $<HTMLButtonElement>('export-fitted').disabled = false;
@@ -302,21 +330,101 @@ $('fit').onclick = async () => {
   }
 };
 
-$('export-fitted').onclick = () => {
-  if (!fitted) return;
-  download(`accessory.${activePoint}.fitted.stl`, serializeStl(fitted.mesh));
+const exportStl = () => { if (paint) download(`accessory.${activePoint}.fitted.stl`, serializeStl(paint.mesh)); };
+$('export-fitted').onclick = exportStl;
+$('export-fitted-2').onclick = exportStl;
+
+// ---------- paint ----------
+let paint: PaintState | null = null;
+const palette: Material[] = [
+  { name: 'Base', color: '#e9dcc3' },
+  { name: 'Black', color: '#222222' },
+  { name: 'Orange', color: '#f28c28' },
+  { name: 'Red', color: '#d03b2f' },
+];
+let activeMaterial = 1;
+
+function renderPalette() {
+  const el = $('palette');
+  el.innerHTML = '';
+  palette.forEach((m, i) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (i === activeMaterial ? ' active' : '');
+    const color = document.createElement('input');
+    color.type = 'color'; color.value = m.color;
+    color.oninput = () => { m.color = color.value; paint?.recolor(); };
+    const name = document.createElement('input');
+    name.type = 'text'; name.value = m.name; name.title = 'Filament name, as it will appear in the 3MF';
+    name.onchange = () => { m.name = name.value; };
+    sw.append(color, name);
+    sw.onclick = (e) => { if (e.target === sw || e.target === color) { activeMaterial = i; renderPalette(); } };
+    el.appendChild(sw);
+  });
+}
+$('palette-add').onclick = () => { palette.push({ name: `Colour ${palette.length + 1}`, color: '#4f8bd6' }); activeMaterial = palette.length - 1; renderPalette(); };
+$<HTMLInputElement>('brush').oninput = () => { $('brush-out').textContent = Number($<HTMLInputElement>('brush').value).toFixed(1); };
+$('fill-all').onclick = () => { if (paint) { paint.snapshot(); paint.fillAll(activeMaterial); } };
+$('undo').onclick = () => { if (paint && !paint.undo()) status('Nothing to undo.'); };
+$('refine').onclick = async () => {
+  if (!paint) return;
+  const len = Number($<HTMLInputElement>('refine-len').value);
+  status('Refining…');
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    const m = await toManifold(paint.mesh);
+    const refined = fromManifold(m.refineToLength(len));
+    showFitted(refined);
+    status(`Refined to ${(refined.triangles.length / 3).toLocaleString()} faces.`);
+  } catch (err) {
+    status(`Refine failed: ${(err as Error).message}`);
+  }
 };
+$('export-3mf').onclick = () => {
+  if (!paint) return;
+  const used = new Set(paint.faceMaterial);
+  const names = palette.filter((_, i) => used.has(i)).map((m) => m.name).join(', ');
+  download(`accessory.${activePoint}.fitted.3mf`, write3mf(paint.mesh, palette, paint.faceMaterial, `goose ${activePoint} accessory`));
+  status(`3MF exported with colours: ${names}. Map them to filaments in your slicer.`);
+};
+renderPalette();
+
+let painting = false;
+function paintAt(e: PointerEvent) {
+  if (!paint || !fittedObject) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(fittedObject)[0];
+  if (hit && paint.brush(hit.point, Number($<HTMLInputElement>('brush').value), activeMaterial)) {
+    let painted = 0;
+    for (const m of paint.faceMaterial) if (m !== 0) painted++;
+    $('paint-info').textContent = `${paint.faceMaterial.length.toLocaleString()} faces, ${painted.toLocaleString()} painted.`;
+  }
+}
+
+// ---------- tabs ----------
+let tab = 'accessory';
+function setTab(name: string) {
+  tab = name;
+  for (const x of document.querySelectorAll<HTMLButtonElement>('.tabs button')) x.classList.toggle('active', x.dataset.tab === name);
+  for (const t of ['accessory', 'hole', 'paint']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  // in paint mode the left button paints and the right button orbits
+  controls.mouseButtons = name === 'paint'
+    ? { LEFT: null as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE }
+    : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+}
+for (const b of document.querySelectorAll<HTMLButtonElement>('.tabs button')) b.onclick = () => setTab(b.dataset.tab!);
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (tab !== 'paint' || e.button !== 0 || !paint) return;
+  painting = true;
+  paint.snapshot();
+  paintAt(e);
+});
+renderer.domElement.addEventListener('pointermove', (e) => { if (painting) paintAt(e); });
+window.addEventListener('pointerup', () => { painting = false; });
 
 // ---------- magnet hole tool ----------
-let tab = 'accessory';
-for (const b of document.querySelectorAll<HTMLButtonElement>('.tabs button')) {
-  b.onclick = () => {
-    tab = b.dataset.tab!;
-    for (const x of document.querySelectorAll<HTMLButtonElement>('.tabs button')) x.classList.toggle('active', x === b);
-    $('tab-accessory').classList.toggle('hidden', tab !== 'accessory');
-    $('tab-hole').classList.toggle('hidden', tab !== 'hole');
-  };
-}
 $<HTMLSelectElement>('hole-mode').onchange = (e) => {
   $('skin-row').classList.toggle('hidden', (e.target as HTMLSelectElement).value !== 'embedded');
 };
@@ -380,5 +488,15 @@ function download(name: string, bytes: Uint8Array) {
   a.href = url; a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// small hook for the headless smoke test: where a world point lands on screen
+(window as unknown as { __goose: unknown }).__goose = {
+  get profile() { return profile; },
+  toScreen(p: V3) {
+    const v = new THREE.Vector3(...p).project(camera);
+    const rect = renderer.domElement.getBoundingClientRect();
+    return [rect.left + ((v.x + 1) / 2) * rect.width, rect.top + ((1 - v.y) / 2) * rect.height];
+  },
+};
 
 init().catch((e) => status(`Failed to load: ${e.message}`));

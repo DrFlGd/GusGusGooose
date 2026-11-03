@@ -49,6 +49,39 @@ await page.waitForFunction(() => document.getElementById('fit-result').textConte
 console.log('3b.', await page.locator('#fit-result').textContent());
 await page.screenshot({ path: join(out, '3b-dome-wing.png') });
 
+// paint: refine, drag a stroke across the fitted dome, export a 3MF
+await page.click('.tabs button[data-tab="paint"]');
+await page.click('#refine');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Refined'), null, { timeout: 60000 });
+console.log('3c.', await status());
+await page.evaluate(() => { document.querySelector('#palette .swatch:nth-child(3)').click(); });
+// the left wing faces away from the default camera; paint the head puck instead
+await page.click('.tabs button[data-tab="accessory"]');
+await page.selectOption('#point', 'head');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+await page.click('.tabs button[data-tab="paint"]');
+// stroke across the top of the head puck (its top face is 8 mm up the magnet axis, minus the 2 mm sink)
+const [sx, sy, ex, ey] = await page.evaluate(() => {
+  const h = window.__goose.profile.points.head;
+  const top = h.center.map((c, i) => c + h.axis[i] * 6);
+  const a = window.__goose.toScreen([top[0] - 6, top[1], top[2]]);
+  const b = window.__goose.toScreen([top[0] + 6, top[1], top[2]]);
+  return [...a, ...b];
+});
+await page.mouse.move(sx, sy);
+await page.mouse.down();
+await page.mouse.move(ex, ey, { steps: 12 });
+await page.mouse.up();
+const paintedFaces = await page.evaluate(() => document.getElementById('paint-info').textContent);
+console.log('3d. after stroke:', paintedFaces);
+const [download] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#export-3mf')]);
+const threemf = join(out, 'accessory.3mf');
+await download.saveAs(threemf);
+console.log('3e.', await status(), '→', threemf);
+await page.screenshot({ path: join(out, '3c-painted.png') });
+await page.click('.tabs button[data-tab="accessory"]');
+
 // magnet hole: click the middle of the view, which lands on the goose body
 await page.click('.tabs button[data-tab="hole"]');
 const box = await page.locator('#view canvas').boundingBox();
