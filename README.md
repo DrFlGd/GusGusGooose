@@ -10,7 +10,7 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 ## Desktop app and library
 
 The app also runs as a portable desktop app (Tauri), from the same web
-build: no installer, just a folder (Windows, macOS) or an AppImage (Linux)
+build: no installer, just a folder (Windows) or an AppImage (Linux)
 that runs where it is put. Releases are on the repository's Releases page.
 The **Desktop app** workflow publishes one when main is pushed with an app
 version (`src-tauri/tauri.conf.json`) that has no release yet, tagged
@@ -18,7 +18,7 @@ version (`src-tauri/tauri.conf.json`) that has no release yet, tagged
 the Actions tab (zips as artifacts, no release). Bump the version to release
 again. The builds are
 not signed; `docs/PORTABLE.txt` (README.txt in each zip) says how to get past
-SmartScreen and Gatekeeper. To run it from source you need Rust and the
+SmartScreen. To run it from source you need Rust and the
 Tauri prerequisites for your system: `npm run desktop` (development, live
 reload) or `npm run desktop:build`.
 
@@ -37,8 +37,7 @@ deleted, given another picture or exported as 3MF without opening them.
 On the desktop each build is a folder of plain files in
 `Gus Gus Goose Library` next to the app (with `Gus Gus Goose settings.json`
 beside it), so the app and its builds move or copy together; when the
-app's folder cannot be written (Program Files, a read-only disk, macOS
-running a quarantined app from a temporary copy) both go to the system's
+app's folder cannot be written (Program Files, a read-only disk) both go to the system's
 app data folder instead. Settings (the gear in the top bar) moves the
 library to any folder, taking the builds along or not (to use a library
 already there), puts it back next to the app, or shows it in the file
