@@ -288,3 +288,10 @@ button.danger:hover:not(:disabled) { border-color: var(--err); }
   .lib-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .lib-save-top { grid-template-columns: 1fr; }
 }
+
+/* settings */
+.settings-path { display: block; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); font: 12px var(--mono); overflow-wrap: anywhere; }
+.settings .lib-group-title { margin-top: 6px; }
+.settings label.check span { font-size: 13px; }
+/* a dialog without a set height sizes to its body (WebKit collapses a flex: 1 body to nothing there) */
+.dialog:not(.wide) .dialog-body { flex: 0 1 auto; }

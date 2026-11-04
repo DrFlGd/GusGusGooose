@@ -211,3 +211,16 @@ export async function saveExport(name: string, bytes: Uint8Array): Promise<boole
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   return true;
 }
+
+// ---------- desktop only: where the library is, and moving it ----------
+export interface LibraryInfo { path: string; defaultPath: string; portable: boolean; custom: boolean; builds: number }
+async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
+}
+export const libraryInfo = () => call<LibraryInfo>('library_info');
+/** The system's folder dialog; null when cancelled. */
+export const pickLibraryFolder = () => call<string | null>('library_pick_folder');
+/** Uses `path` (null: the default next to the app) as the library, moving the builds there when `moveBuilds`. */
+export const setLibraryFolder = (path: string | null, moveBuilds: boolean) => call<{ moved: number; skipped: number }>('library_set_dir', { path, moveBuilds });
+export const openLibraryFolder = () => call<void>('library_open_folder');

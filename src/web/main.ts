@@ -16,6 +16,7 @@ import { parseSvg } from '../vendor/svg.ts';
 import { DEFAULT_IMAGE_SETTINGS, hex, prepareImage, traceWith, tracedPreview, type ImageSettings } from './prepare-image.ts';
 import { bytesJson, isDesktop, jsonBytes, libraryStore, newId, safeName, saveExport, type BuildMeta } from './library-store.ts';
 import { canvasPng, LibraryView } from './library-view.ts';
+import { openSettings } from './settings-view.ts';
 import { decodePart, encodePart } from '../part-file.ts';
 import { PaintModel } from '../paint-model.ts';
 import { DEFAULT_NECK, fitOnNeck, makeNeckBand, SLOT_SKIN, type NeckBand, type NeckOptions } from '../neck.ts';
@@ -2280,6 +2281,7 @@ const library = new LibraryView({
   currentId: () => currentBuild?.id ?? null,
 }, { side: $('tab-library'), grid: $('library-grid'), detail: $('library-detail') });
 $('save-library').onclick = () => { void saveToLibrary(); };
+$('settings').onclick = () => openSettings({ status, libraryChanged: () => { currentBuild = null; updateLibraryButtons(); void library.refresh(); } });
 $('open-library').onclick = () => setTab('library');
 window.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (tab !== 'library') void saveToLibrary(); }

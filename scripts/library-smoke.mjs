@@ -167,6 +167,11 @@ const counts = await page.$$eval('.lib-cols li', (lis) => Object.fromEntries(lis
 console.log('9. counts:', JSON.stringify(counts));
 check(counts['Desk days'] === '1' && counts.Christmas === '1' && counts["Valentine's Day"] === '1' && counts['All builds'] === '3', 'collection counts are off');
 await page.screenshot({ path: join(out, 'library-collections.png') });
+// Settings: in the browser it says the library is in the browser's storage
+await page.click('#settings');
+await page.waitForSelector('.dialog.settings');
+check((await page.textContent('.dialog.settings')).includes("browser's own storage"), 'the Settings dialog does not explain the browser library');
+await page.click('.dialog.settings .primary');
 // the dark theme
 await page.click('#theme');
 await page.screenshot({ path: join(out, 'library-dark.png') });

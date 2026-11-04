@@ -1,7 +1,9 @@
 name: Desktop app
-# Builds the Tauri desktop app for Windows, macOS and Linux. Run it from the
-# Actions tab (Run workflow) and download the installers from the run's
-# artifacts; pushing a tag like v0.2.0 also attaches them to a draft release.
+# Builds the portable desktop app for Windows, macOS and Linux. Each is a
+# folder or a single file that runs where it is put, with no installer; the
+# library and settings are kept next to it. Run it from the Actions tab (Run
+# workflow) to get the zips as artifacts; pushing a tag like v0.2.0 also
+# publishes them as a GitHub release.
 on:
   workflow_dispatch:
   push:
@@ -28,6 +30,8 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -38,26 +42,59 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - run: npm ci
       - run: npm test
-      - name: Build the app
-        run: npx tauri build
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "v=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Windows: the bare .exe in its own folder (WebView2 comes with Windows 10 and 11)
+      - name: Build (Windows)
+        if: matrix.name == 'windows'
+        run: npx tauri build --no-bundle
+      - name: Zip (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "out/Gus Gus Goose" | Out-Null
+          Copy-Item "src-tauri/target/release/gusgusgoose.exe" "out/Gus Gus Goose/Gus Gus Goose.exe"
+          Copy-Item "docs/PORTABLE.txt" "out/Gus Gus Goose/README.txt"
+          Compress-Archive -Path "out/Gus Gus Goose" -DestinationPath "out/Gus-Gus-Goose-${{ steps.v.outputs.v }}-windows-portable.zip"
+
+      # macOS: the .app for Apple silicon and Intel, in a folder
+      - name: Build (macOS)
+        if: matrix.name == 'macos'
+        run: npx tauri build --target universal-apple-darwin --bundles app
+      - name: Zip (macOS)
+        if: matrix.name == 'macos'
+        run: |
+          mkdir -p "out/Gus Gus Goose"
+          cp -R "src-tauri/target/universal-apple-darwin/release/bundle/macos/Gus Gus Goose.app" "out/Gus Gus Goose/"
+          cp docs/PORTABLE.txt "out/Gus Gus Goose/README.txt"
+          cd out && ditto -c -k --sequesterRsrc --keepParent "Gus Gus Goose" "Gus-Gus-Goose-${{ steps.v.outputs.v }}-macos-portable.zip"
+
+      # Linux: an AppImage is already one portable file
+      - name: Build (Linux)
+        if: matrix.name == 'linux'
+        run: npx tauri build --bundles appimage
+      - name: Collect (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          mkdir -p out
+          cp src-tauri/target/release/bundle/appimage/*.AppImage "out/Gus-Gus-Goose-${{ steps.v.outputs.v }}-linux-x86_64.AppImage"
+
       - uses: actions/upload-artifact@v4
         with:
           name: gus-gus-goose-${{ matrix.name }}
           path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/appimage/*.AppImage
+            out/*.zip
+            out/*.AppImage
           if-no-files-found: error
-      - name: Attach to a draft release
+      - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
+          name: Gus Gus Goose ${{ github.ref_name }}
+          body_path: docs/RELEASE.md
           files: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/appimage/*.AppImage
+            out/*.zip
+            out/*.AppImage

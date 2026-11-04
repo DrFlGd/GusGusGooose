@@ -9,15 +9,15 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 
 ## Desktop app and library
 
-The app also runs as a desktop app (Tauri), from the same web build. To get
-installers, run the **Desktop app** workflow from the Actions tab and
-download the Windows (`.msi`/`.exe`), macOS (`.dmg`) or Linux (`.deb`,
-`.AppImage`) artifact; pushing a `v*` tag attaches them to a draft release.
-The builds are not signed, so Windows SmartScreen asks to confirm the first
-run and macOS needs right-click → Open (or `xattr -cr "Gus Gus Goose.app"`).
-To run it from source you need Rust and the Tauri prerequisites for your
-system: `npm run desktop` (development, live reload) or
-`npm run desktop:build`.
+The app also runs as a portable desktop app (Tauri), from the same web
+build: no installer, just a folder (Windows, macOS) or an AppImage (Linux)
+that runs where it is put. Releases are on the repository's Releases page;
+pushing a `v*` tag builds them with the **Desktop app** workflow, which can
+also be run by hand from the Actions tab (zips as artifacts). The builds are
+not signed; `docs/PORTABLE.txt` (README.txt in each zip) says how to get past
+SmartScreen and Gatekeeper. To run it from source you need Rust and the
+Tauri prerequisites for your system: `npm run desktop` (development, live
+reload) or `npm run desktop:build`.
 
 The **Library** tab keeps saved builds. *Save to library* (right column of
 the editor, or Ctrl+S) keeps the model or picture it was made from, every
@@ -31,11 +31,15 @@ paint back on, so the build can be changed and saved over or saved as new.
 Collections can be added, renamed and removed; builds can be duplicated,
 deleted, given another picture or exported as 3MF without opening them.
 
-On the desktop each build is a folder of plain files in the app's data
-folder (`%APPDATA%\com.drflgd.gusgusgoose\library` on Windows,
-`~/Library/Application Support/com.drflgd.gusgusgoose/library` on macOS,
-`~/.local/share/com.drflgd.gusgusgoose/library` on Linux), so it can be
-backed up or copied; exports go through a Save dialog. In the browser the
+On the desktop each build is a folder of plain files in
+`Gus Gus Goose Library` next to the app (with `Gus Gus Goose settings.json`
+beside it), so the app and its builds move or copy together; when the
+app's folder cannot be written (Program Files, a read-only disk, macOS
+running a quarantined app from a temporary copy) both go to the system's
+app data folder instead. Settings (the gear in the top bar) moves the
+library to any folder, taking the builds along or not (to use a library
+already there), puts it back next to the app, or shows it in the file
+manager. Exports go through a Save dialog. In the browser the
 library lives in the browser's own storage (IndexedDB), per browser. A build
 assumes the bundled goose: holes cut on the Hole tab are not part of it.
 `npm run smoke:library` drives the library headlessly.

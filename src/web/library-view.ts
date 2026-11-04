@@ -161,7 +161,7 @@ export class LibraryView {
     );
     void this.store.where().then((w) => {
       const p = el.querySelector('#lib-where');
-      if (p) p.textContent = this.store.kind === 'desktop' ? `Saved as files in ${w}. Each build is a folder you can back up or copy.` : `Saved in ${w}. The desktop app keeps its library as files instead; clearing this site's data clears this one.`;
+      if (p) p.textContent = this.store.kind === 'desktop' ? `Saved as files in ${w}. Each build is a folder you can back up or copy; Settings (the gear at the top) moves the library.` : `Saved in ${w}. The desktop app keeps its library as files instead; clearing this site's data clears this one.`;
     });
   }
 
