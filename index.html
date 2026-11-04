@@ -15,6 +15,7 @@
         <button data-tab="clothing">Clothing</button>
         <button data-tab="paint" id="paint-tab-button" disabled title="Load an accessory or make a garment first">Paint</button>
         <button data-tab="hole">Hole</button>
+        <button data-tab="library" id="library-tab-button" title="Saved builds by holiday and category">Library</button>
       </nav>
       <div class="top-actions">
         <button id="theme" class="icon" title="Light or dark" aria-label="Light or dark"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5" /><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor" /></svg></button>
@@ -513,7 +514,13 @@
         </div>
       </section>
 
+      <!-- ============ Library (filled in by library-view.ts) ============ -->
+      <section id="tab-library" class="tab hidden" aria-label="Collections"></section>
     </aside>
+    <section id="library" class="library hidden" aria-label="Saved builds">
+      <div id="library-grid" class="library-scroll"></div>
+      <p id="library-status" class="status" aria-live="polite"></p>
+    </section>
     <section id="view" class="stage" aria-label="Preview">
       <canvas id="overlay"></canvas>
       <div class="stage-tools">
@@ -530,6 +537,16 @@
       <p id="status" class="status">Loading goose…</p>
     </section>
     <aside class="side right" aria-label="Export">
+      <div id="library-detail" class="hidden"></div>
+      <div id="editor-right">
+      <section class="group-static">
+        <h2 class="panel-title">Library</h2>
+        <div class="export">
+          <button id="save-library" class="export-btn" disabled><span>Save to library</span><small>The model, its settings, the fitted part and its paint, to open and edit later (Ctrl+S)</small></button>
+        </div>
+        <p id="library-current" class="small muted"></p>
+        <div class="row"><button id="open-library">Open the library</button></div>
+      </section>
       <section class="group-static">
         <h2 class="panel-title">Export</h2>
         <div class="export">
@@ -556,6 +573,7 @@
         <h2 class="panel-title">Goose colours</h2>
         <div id="goose-colours"></div>
       </section>
+      </div>
     </aside>
     </main>
   </div>

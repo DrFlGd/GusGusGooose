@@ -13,7 +13,11 @@ import { buildFlat, cssColor, DEFAULT_FLAT, svgDesign, type FlatDesign, type Fla
 import { bounds, type Contour, type RGB } from '../vendor/contour.ts';
 import { decodeImage, type Raster } from '../vendor/trace.ts';
 import { parseSvg } from '../vendor/svg.ts';
-import { hex, prepareImage, tracedPreview, type ImageSettings } from './prepare-image.ts';
+import { DEFAULT_IMAGE_SETTINGS, hex, prepareImage, traceWith, tracedPreview, type ImageSettings } from './prepare-image.ts';
+import { bytesJson, isDesktop, jsonBytes, libraryStore, newId, safeName, saveExport, type BuildMeta } from './library-store.ts';
+import { canvasPng, LibraryView } from './library-view.ts';
+import { decodePart, encodePart } from '../part-file.ts';
+import { PaintModel } from '../paint-model.ts';
 import { DEFAULT_NECK, fitOnNeck, makeNeckBand, SLOT_SKIN, type NeckBand, type NeckOptions } from '../neck.ts';
 import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, type Cavity, type GarmentOptions, type WrapOptions } from '../clothing.ts';
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
@@ -236,7 +240,7 @@ scene.add(markers);
 let pick: { point: V3; normal: V3 } | null = null;
 let pickMarker: THREE.Object3D | null = null;
 
-const status = (s: string) => { $('status').textContent = s; };
+const status = (s: string) => { $('status').textContent = s; $('library-status').textContent = s; };
 
 async function init() {
   const [stl, prof, colors] = await Promise.all([
@@ -381,15 +385,18 @@ const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 let loadSerial = 0;
 /** Loads a model as the accessory; from the Clothing tab (`stay`) it is shown there as the wrap ghost instead of switching tabs. */
-async function loadFile(file: File, stay = false) {
+async function loadFile(file: File, stay = false, before?: () => void) {
   if (IMAGE_FILE.test(file.name)) return loadFlat(file);
+  if (!before) currentBuild = null; // a model loaded by hand is a new build
   status(`Reading ${file.name}…`);
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     const voxel = $<HTMLInputElement>('repair-voxel').value;
-    loaded = await loadModel(file.name, await file.arrayBuffer(), { repair: $<HTMLInputElement>('repair-import').checked, voxel: voxel === '' ? undefined : Number(voxel) });
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    loaded = await loadModel(file.name, bytes.slice().buffer, { repair: $<HTMLInputElement>('repair-import').checked, voxel: voxel === '' ? undefined : Number(voxel) });
     rawModel = loaded.solid;
     rawName = file.name;
+    sourceFile = { name: file.name, bytes };
     preparedKey = '';
     resetFlatPanel();
     // a 3MF's colours become the palette, so they come through to the paint tab and the export
@@ -416,6 +423,7 @@ async function loadFile(file: File, stay = false) {
   $<HTMLButtonElement>('wrap-garment').disabled = false;
   if (!(stay && tab === 'clothing')) setTab('accessory');
   resetPositions(); // a new model starts every position afresh
+  before?.(); // reopening a saved build puts its settings back here, before the first prepare
   await applyPrepare();
   $('cloth-model').textContent = `${file.name} is loaded and ready to wrap.${loaded.repaired ? ' It was rebuilt on a voxel grid on import.' : ''}`;
   updateClearButtons();
@@ -429,9 +437,13 @@ $<HTMLInputElement>('cloth-file').onchange = (e) => {
 /** Forgets the loaded model and any fitted part or garment, back to the bare goose, so another model can be started from scratch. */
 function clearModel() {
   clearFitted();
+  garmentKind = null;
+  currentBuild = null;
+  updateLibraryButtons();
   carry = null;
   rawModel = null;
   rawName = '';
+  sourceFile = null;
   preparedKey = '';
   resetFlatPanel();
   puckAt = undefined; preparedPuckAt = null;
@@ -459,6 +471,7 @@ function clearModel() {
 }
 /** The Clear buttons are live when there is something to clear: a loaded model or a fitted part. */
 function updateClearButtons() {
+  updateLibraryButtons();
   const something = !!rawModel || !!flatDesign || !!fittedObject;
   for (const id of ['clear-model', 'clear-cloth']) {
     const b = $<HTMLButtonElement>(id);
@@ -576,7 +589,8 @@ const flatInfoDefault = $('flat-info').textContent ?? '';
 const designOf = (p: { width: number; height: number; silhouette: FlatDesign['silhouette']; regions: FlatDesign['regions'] }): FlatDesign => ({ width: p.width, height: p.height, silhouette: p.silhouette, regions: p.regions.map((r) => ({ color: r.color, contours: r.contours })) });
 
 /** Reads a picture or SVG as a design and builds it. Cancelling the dialog keeps whatever was there before. */
-async function loadFlat(file: File) {
+async function loadFlat(file: File, restore?: { settings: Partial<ImageSettings>; before: () => void }) {
+  if (!restore) currentBuild = null;
   try {
     let design: FlatDesign, info: string;
     let raster: Raster | null = null;
@@ -592,7 +606,10 @@ async function loadFlat(file: File) {
       status(`Opening ${file.name}…`);
       raster = await decodeImage(file);
       status(`Prepare ${file.name}: drop the background and pick the colours to keep.`);
-      const prepared = await prepareImage(raster, file.name, {});
+      // a saved build traces again with the settings it was saved with, without the dialog
+      const prepared = restore
+        ? traceWith(raster, { ...DEFAULT_IMAGE_SETTINGS, ...restore.settings, adjust: { ...DEFAULT_IMAGE_SETTINGS.adjust, ...restore.settings.adjust } }, file.name)
+        : await prepareImage(raster, file.name, {});
       if (!prepared) { status(`${file.name} was not used.`); $<HTMLInputElement>('flat-file').value = ''; return; }
       design = designOf(prepared);
       settings = prepared.settings;
@@ -602,6 +619,7 @@ async function loadFlat(file: File) {
     flatImageSettings = settings;
     flatDesign = design;
     flatName = file.name;
+    sourceFile = { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
     rawModel = null; rawName = ''; preparedKey = '';
     $('prepare-controls').classList.add('hidden');
     $('model-info').textContent = '';
@@ -610,6 +628,7 @@ async function loadFlat(file: File) {
     $<HTMLButtonElement>('wrap-garment').disabled = true;
     setTab('accessory');
     resetPositions(); // a new model starts every position afresh
+    restore?.before();
     await buildFlatNow();
   } catch (err) {
     status(`${file.name}: ${(err as Error).message}`);
@@ -1061,6 +1080,7 @@ function updatePaintButton() {
 
 /** The export buttons are live when there is a fitted part or a garment, and the panel says what they give. */
 function updateExports() {
+  updateLibraryButtons();
   for (const id of ['export-3mf', 'export-fitted', 'export-split']) $<HTMLButtonElement>(id).disabled = !paint;
   let info = 'Fit an accessory or make a garment to export it.';
   if (paint) {
@@ -1232,20 +1252,27 @@ function paintedForExport(): { mesh: IndexedMesh; faceMaterial: Uint8Array; pain
   const b = paint.baked();
   return { mesh: b.mesh, faceMaterial: b.faceMaterial };
 }
-$('export-3mf').onclick = () => {
-  if (!paint) return;
+/** The painted part as a 3MF with its colours (and the neck band as a second part), and what to say about it. */
+function painted3mf(): { bytes: Uint8Array; note: string } {
+  if (!paint) throw new Error('nothing to export');
   const used = paint.materialsUsed();
   const names = palette.filter((_, i) => used.has(i)).map((m) => m.name).join(', ');
   const part = paintedForExport();
   if (fittedBand) {
     // the painted accessory and the band as two parts of one object
     const parts = [{ name: 'Accessory', material: 0, ...part }, { name: 'Neck band', mesh: fromManifold(fittedBand), material: 0 }];
-    download(`${exportName()}.3mf`, write3mfParts(parts, palette, `goose ${activePoint} accessory`));
-    status(`3MF exported with colours: ${names}, and the neck band as a second part.`);
-    return;
+    return { bytes: write3mfParts(parts, palette, `goose ${activePoint} accessory`), note: `3MF exported with colours: ${names}, and the neck band as a second part.` };
   }
-  download(`${exportName()}.3mf`, write3mf(part.mesh, palette, part.faceMaterial, `goose ${activePoint} accessory`, part.paintCodes));
-  status(`3MF exported with colours: ${names}. Map them to filaments in your slicer${part.paintCodes ? ` (filament ${palette.length > 1 ? `1 to ${palette.length}` : '1'} in palette order)` : ''}.`);
+  return {
+    bytes: write3mf(part.mesh, palette, part.faceMaterial, `goose ${activePoint} accessory`, part.paintCodes),
+    note: `3MF exported with colours: ${names}. Map them to filaments in your slicer${part.paintCodes ? ` (filament ${palette.length > 1 ? `1 to ${palette.length}` : '1'} in palette order)` : ''}.`,
+  };
+}
+$('export-3mf').onclick = () => {
+  if (!paint) return;
+  const r = painted3mf();
+  download(`${exportName()}.3mf`, r.bytes);
+  status(r.note);
 };
 /** The fitted part's file name: the garment's when one was made, else the accessory's point. */
 const exportName = () => (garmentName && !fitted ? garmentName : `accessory.${activePoint}.fitted`);
@@ -1685,8 +1712,16 @@ renderer.domElement.addEventListener('dblclick', (e) => {
 let tab = 'accessory';
 function setTab(name: string) {
   tab = name;
+  const lib = name === 'library';
+  if (!lib) editorTab = name;
   for (const x of document.querySelectorAll<HTMLButtonElement>('.tabs button')) x.classList.toggle('active', x.dataset.tab === name);
-  for (const t of ['accessory', 'clothing', 'hole', 'paint']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['accessory', 'clothing', 'hole', 'paint', 'library']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  // the Library takes the view and the export column for its cards and the chosen build
+  $('view').classList.toggle('hidden', lib);
+  $('library').classList.toggle('hidden', !lib);
+  $('editor-right').classList.toggle('hidden', !!lib);
+  $('library-detail').classList.toggle('hidden', !lib);
+  if (lib) void library.show();
   guides.visible = name === 'clothing';
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   applyFocus();
@@ -1861,6 +1896,7 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
     clearFitted();
     showFitted(g.mesh, g.faceMaterial);
     garmentParts = g.parts && g.parts.length > 1 ? g.parts.map((p) => fromManifold(p)) : null;
+    garmentKind = kind;
     garmentName = kind === 'shirt' ? `shirt.${o.hem}-${o.neck}` : `${rawName.replace(/\.[^.]+$/, '')}.wrapped`;
     const secs = ((performance.now() - t0) / 1000).toFixed(1);
     $('cloth-result').textContent = `Done in ${secs} s: ${g.solid.volume().toFixed(0)} mm³, ${(g.mesh.triangles.length / 3).toLocaleString()} faces. ${g.warnings.join('; ')}`;
@@ -1874,6 +1910,8 @@ async function makeGarment(kind: 'shirt' | 'wrap') {
   }
 }
 let garmentName = 'shirt';
+/** what the garment shown was made as, for saving it */
+let garmentKind: 'shirt' | 'wrap' | null = null;
 let garmentParts: IndexedMesh[] | null = null;
 $('make-shirt').onclick = () => { makeGarment('shirt'); };
 $('wrap-garment').onclick = () => { makeGarment('wrap'); };
@@ -1985,12 +2023,269 @@ $('cut-hole').onclick = async () => {
 $('export-goose').onclick = () => download('goose.holed.stl', serializeStl(gooseMesh));
 $('export-profile').onclick = () => download('profile.json', new TextEncoder().encode(JSON.stringify(profile, null, 2)));
 
+/** A download in the browser; the Save dialog on the desktop. */
 function download(name: string, bytes: Uint8Array) {
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/octet-stream' }));
-  const a = document.createElement('a');
-  a.href = url; a.download = name; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveExport(name, bytes).catch((err) => status(`Could not save ${name}: ${(err as Error).message}`));
 }
+
+// ---------- the library: save the build, open it again later ----------
+// A build keeps the file it was made from, every setting (as the panel's inputs hold them, plus each position's
+// placement, the moved puck or mount, the picture's trace settings and the palette), the fitted part with its paint,
+// a 3MF of it and a thumbnail. Opening it loads the file again, puts the settings back, fits again and lays the paint
+// back on: straight onto the same faces when the fit comes out the same, else by where it lay.
+interface SavedState {
+  version: 1;
+  inputs: Record<string, string | boolean>;
+  activePoint: string;
+  positions: [string, PositionState][];
+  puckAt?: [number, number];
+  flatMountAt?: [number, number];
+  flatImageSettings?: Partial<ImageSettings>;
+  palette: Material[];
+  garment: 'shirt' | 'wrap' | null;
+  fitted: boolean;
+  tab: string;
+  camera: { position: number[]; target: number[] };
+}
+/** the build open in the editor when it came from (or went to) the library */
+let currentBuild: BuildMeta | null = null;
+/** the file the loaded model or picture came from, kept to save with the build */
+let sourceFile: { name: string; bytes: Uint8Array } | null = null;
+/** the editor tab to go back to from the Library */
+let editorTab = 'accessory';
+
+/** Inputs that are part of a build: every named field of the panel and the export column, but not file pickers or the library's own. */
+function buildInputs(): (HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement)[] {
+  return [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('#panel [id]:is(input, select, textarea), #editor-right [id]:is(input, select, textarea)')]
+    .filter((el) => !(el instanceof HTMLInputElement && el.type === 'file') && !el.closest('#tab-library'));
+}
+function readInputs(): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const el of buildInputs()) out[el.id] = el instanceof HTMLInputElement && el.type === 'checkbox' ? el.checked : el.value;
+  return out;
+}
+/** Puts saved values back without firing their handlers (the caller rebuilds what they feed), then lines up the sliders. */
+function writeInputs(values: Record<string, string | boolean>) {
+  for (const el of buildInputs()) {
+    if (!(el.id in values)) continue;
+    const v = values[el.id];
+    if (el instanceof HTMLInputElement && el.type === 'checkbox') el.checked = v === true;
+    else el.value = String(v);
+  }
+  for (const r of document.querySelectorAll<HTMLInputElement>('#panel input[type="range"]')) syncSlider(r.id);
+  $('skin-row').classList.toggle('hidden', $<HTMLSelectElement>('hole-mode').value !== 'embedded');
+}
+
+function savedState(): SavedState {
+  savePosition();
+  return {
+    version: 1,
+    inputs: readInputs(),
+    activePoint,
+    positions: [...positions],
+    puckAt, flatMountAt,
+    flatImageSettings: flatDesign ? flatImageSettings : undefined,
+    palette: palette.map((m) => ({ ...m })),
+    garment: paint && !fitted ? garmentKind : null,
+    fitted: !!paint,
+    tab: tab === 'library' ? editorTab : tab,
+    camera: { position: camera.position.toArray(), target: controls.target.toArray() },
+  };
+}
+/** The saved settings, put back where loading the file would have set its defaults. */
+function applySaved(st: SavedState) {
+  positions.clear();
+  for (const [k, v] of st.positions) positions.set(k, v);
+  if (st.activePoint === 'neck' || profile.points[st.activePoint]) activePoint = st.activePoint;
+  writeInputs(st.inputs);
+  puckAt = st.puckAt;
+  flatMountAt = st.flatMountAt;
+  if (st.flatImageSettings) flatImageSettings = st.flatImageSettings;
+  renderPoints();
+  updateMountControls();
+  updateGuides();
+}
+
+const sameArray = (a: ArrayLike<number>, b: ArrayLike<number>) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false; return true; };
+/** Lays saved paint on the part just fitted: face for face when it is the same mesh, else from where it lay. */
+function restorePaint(bytes: Uint8Array): string {
+  if (!paint) return '';
+  const saved = decodePart(bytes);
+  if (sameArray(saved.mesh.triangles, paint.mesh.triangles) && sameArray(saved.mesh.positions, paint.mesh.positions)) {
+    paint.restore(saved.faceMaterial, saved.trees);
+  } else {
+    const old = new PaintModel(saved.mesh);
+    old.restore(saved.faceMaterial, saved.trees);
+    paint.transferFrom(old, (p) => p);
+  }
+  paint.recolor();
+  updatePaintInfo();
+  updateExports();
+  return paint.painted ? ' Its paint is back on.' : '';
+}
+
+/** The view as it is, cropped square, without the magnet markers, rings or grid. */
+async function captureThumbnail(size = 512): Promise<Uint8Array> {
+  const hide = [markers, guides, grid, gizmo.getHelper(), pickMarker].filter((o): o is THREE.Object3D => !!o);
+  const was = hide.map((o) => o.visible);
+  for (const o of hide) o.visible = false;
+  // the part fills the middle with a little of the goose round it, seen from where the view looks now
+  const cam = camera.clone();
+  const subject = fittedObject ?? (accessoryObject?.visible ? accessoryPivot : null) ?? (ghost?.visible ? ghost : null);
+  if (subject) {
+    const box = new THREE.Box3().setFromObject(subject);
+    if (!box.isEmpty()) {
+      const centre = box.getCenter(new THREE.Vector3());
+      const radius = Math.max(20, box.getSize(new THREE.Vector3()).length() / 2) * 2.8;
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      const vfov = THREE.MathUtils.degToRad(cam.fov), hfov = 2 * Math.atan(Math.tan(vfov / 2) * cam.aspect);
+      cam.position.copy(centre).addScaledVector(dir, radius / Math.sin(Math.min(vfov, hfov) / 2));
+      cam.lookAt(centre);
+      cam.updateMatrixWorld();
+    }
+  }
+  renderer.render(scene, cam);
+  const src = renderer.domElement, w = src.width, h = src.height, s = Math.min(w, h);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  c.getContext('2d')!.drawImage(src, (w - s) / 2, (h - s) / 2, s, s, 0, 0, size, size); // same task as the render, so the buffer is still there
+  hide.forEach((o, i) => { o.visible = was[i]; });
+  return canvasPng(c);
+}
+
+const stripExt = (n: string) => n.replace(/\.[^.]+$/, '');
+/** What is in the editor, as the library files it: something loaded, or a garment made. */
+function buildKind(): BuildMeta['kind'] | null {
+  if (paint && !fitted && garmentKind) return 'garment';
+  if (flatDesign) return 'picture';
+  if (rawModel) return 'model';
+  return null;
+}
+function suggestedName(): string {
+  const kind = buildKind();
+  if (kind === 'garment') return garmentKind === 'shirt' ? 'Shirt' : stripExt(sourceFile?.name ?? 'Garment');
+  const what = stripExt((kind === 'picture' ? flatName : rawName) || 'Accessory');
+  return activePoint ? `${what} (${activePoint.replace('_', ' ')})` : what;
+}
+
+/** Saves what is in the editor to the library: over the build it was opened from, or as a new one. */
+async function saveToLibrary() {
+  const kind = buildKind();
+  if (!kind || tab === 'library') { status('Load a model or a picture, or make a garment, to save it to the library.'); return; }
+  const thumb = await captureThumbnail();
+  const thumbUrl = URL.createObjectURL(new Blob([thumb as BlobPart], { type: 'image/png' }));
+  const initial = currentBuild
+    ? { name: currentBuild.name, description: currentBuild.description, tags: currentBuild.tags, collection: currentBuild.collection }
+    : { name: suggestedName(), description: '', tags: [], collection: kind === 'garment' ? 'clothing' : '' };
+  const answer = await library.detailsDialog({ title: currentBuild ? `Save ${currentBuild.name}` : 'Save to library', initial, thumbUrl, saveAsNew: !!currentBuild });
+  URL.revokeObjectURL(thumbUrl);
+  if (!answer) return;
+  status('Saving to the library…');
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    const state = savedState();
+    const files: Record<string, Uint8Array> = { 'state.json': jsonBytes(state), 'thumb.png': thumb };
+    const garmentSource = kind !== 'garment' || garmentKind === 'wrap';
+    if (sourceFile && garmentSource) files[`source-${safeName(sourceFile.name)}`] = sourceFile.bytes;
+    if (paint) { files['part.bin'] = encodePart(paint); files['part.3mf'] = painted3mf().bytes; }
+    const now = Date.now();
+    const reuse = currentBuild && !answer.asNew ? currentBuild : null;
+    const used = paint?.materialsUsed();
+    const meta: BuildMeta = {
+      version: 1,
+      id: reuse?.id ?? newId(),
+      name: answer.name, description: answer.description, tags: answer.tags, collection: answer.collection,
+      kind,
+      point: kind === 'garment' ? '' : activePoint,
+      sourceName: garmentSource ? sourceFile?.name ?? '' : '',
+      created: reuse?.created ?? now,
+      updated: now,
+      fitted: !!paint,
+      faces: paint?.count,
+      colours: used ? palette.filter((_, i) => used.has(i)).map((m) => ({ name: m.name, color: m.color })) : undefined,
+      files: Object.keys(files),
+    };
+    const store = libraryStore();
+    await store.save(meta, files);
+    // files an older save had that this one does not (a part fitted then, or another source file) go
+    if (reuse && store.kind === 'desktop') for (const f of reuse.files) if (!meta.files.includes(f)) await (await import('@tauri-apps/api/core')).invoke('library_remove', { path: `${meta.id}/${f}` }).catch(() => {});
+    currentBuild = meta;
+    updateLibraryButtons();
+    status(`Saved ${meta.name} to the library${paint ? ' with its fitted part and paint' : ''}.`);
+  } catch (err) {
+    status(`Could not save to the library: ${(err as Error).message}`);
+  }
+}
+
+let opening = false;
+/** Opens a saved build in the editor: its file, its settings, the fit and the paint. */
+async function openBuild(meta: BuildMeta) {
+  if (opening || fitting) return;
+  opening = true;
+  const store = libraryStore();
+  try {
+    status(`Opening ${meta.name}…`);
+    const stateBytes = await store.read(meta.id, 'state.json');
+    if (!stateBytes) throw new Error('its settings file is missing');
+    const st = bytesJson<SavedState>(stateBytes);
+    const srcName = meta.files.find((f) => f.startsWith('source-'));
+    const src = srcName ? await store.read(meta.id, srcName) : null;
+    if (srcName && !src) throw new Error('its model file is missing');
+    const part = st.fitted && meta.files.includes('part.bin') ? await store.read(meta.id, 'part.bin') : null;
+    clearModel();
+    setTab(st.garment ? 'clothing' : 'accessory');
+    const before = () => applySaved(st);
+    if (src) {
+      const file = new File([src as BlobPart], meta.sourceName || srcName!.slice(7));
+      if (meta.kind === 'picture') await loadFlat(file, { settings: st.flatImageSettings ?? {}, before });
+      else await loadFile(file, !!st.garment, before);
+      if (!rawModel && !flatDesign) throw new Error('its model could not be loaded again');
+    } else {
+      applySaved(st);
+    }
+    setPalette(st.palette);
+    let note = '';
+    if (st.garment) await makeGarment(st.garment);
+    else if (st.fitted) await runFit();
+    if (part && paint) note = restorePaint(part);
+    else if (st.fitted && !paint) note = ' The fit did not come out this time; see the status above and fit again.';
+    controls.target.fromArray(st.camera.target);
+    camera.position.fromArray(st.camera.position);
+    controls.update();
+    idMap = null;
+    setTab(st.tab === 'paint' && paint ? 'paint' : st.garment ? 'clothing' : st.tab === 'hole' ? 'hole' : 'accessory');
+    currentBuild = meta;
+    updateLibraryButtons();
+    status(`Opened ${meta.name}.${note} Save to library keeps your changes.`);
+  } catch (err) {
+    status(`Could not open ${meta.name}: ${(err as Error).message}`);
+  } finally {
+    opening = false;
+  }
+}
+
+/** The editor's Save button says what it will do. */
+function updateLibraryButtons() {
+  const b = $<HTMLButtonElement>('save-library');
+  const kind = buildKind();
+  b.disabled = !kind;
+  b.title = kind ? '' : 'Load a model or a picture, or make a garment, first';
+  $('library-current').textContent = currentBuild ? `Open from the library: ${currentBuild.name}.` : kind ? 'Not saved yet.' : 'Saved builds can be opened again from the Library tab.';
+}
+
+const library = new LibraryView({
+  open: openBuild,
+  status,
+  saveFile: saveExport,
+  currentId: () => currentBuild?.id ?? null,
+}, { side: $('tab-library'), grid: $('library-grid'), detail: $('library-detail') });
+$('save-library').onclick = () => { void saveToLibrary(); };
+$('open-library').onclick = () => setTab('library');
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (tab !== 'library') void saveToLibrary(); }
+});
+updateLibraryButtons();
+if (isDesktop()) document.documentElement.classList.add('desktop');
 
 // small hook for the headless smoke test: where a world point lands on screen
 (window as unknown as { __goose: unknown }).__goose = {
