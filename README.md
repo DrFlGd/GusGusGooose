@@ -11,9 +11,12 @@ The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.
 
 The app also runs as a portable desktop app (Tauri), from the same web
 build: no installer, just a folder (Windows, macOS) or an AppImage (Linux)
-that runs where it is put. Releases are on the repository's Releases page;
-pushing a `v*` tag builds them with the **Desktop app** workflow, which can
-also be run by hand from the Actions tab (zips as artifacts). The builds are
+that runs where it is put. Releases are on the repository's Releases page.
+The **Desktop app** workflow publishes one when main is pushed with an app
+version (`src-tauri/tauri.conf.json`) that has no release yet, tagged
+`v<version>`, or when a `v*` tag is pushed; it can also be run by hand from
+the Actions tab (zips as artifacts, no release). Bump the version to release
+again. The builds are
 not signed; `docs/PORTABLE.txt` (README.txt in each zip) says how to get past
 SmartScreen and Gatekeeper. To run it from source you need Rust and the
 Tauri prerequisites for your system: `npm run desktop` (development, live
