@@ -41,6 +41,21 @@ const boxes = await page.evaluate(() => {
 });
 console.log('1c. number boxes:', boxes.join(' | '));
 if (boxes.join('|') !== '0.1|2.14|2.14|1') throw new Error('the number boxes do not nudge by 0.1 or keep 0.01');
+// sizes, depths and clearances stop at their floor when a negative is typed or pasted; slides and angles keep theirs
+const floors = await page.evaluate(() => {
+  const set = (id, v) => { const b = document.getElementById(id); b.value = v; b.dispatchEvent(new Event('change')); return b.value; };
+  const r = { scale: set('prep-scale', '-2'), radial: set('pocket-radial', '-0.2'), width: set('gen-w', '-5'), slide: set('dx-num', '-3'), turn: set('wrap-dx', '-4') };
+  set('prep-scale', '1'); set('pocket-radial', '0'); set('gen-w', '20'); set('dx-num', '0'); set('wrap-dx', '0');
+  const unfloored = [...document.querySelectorAll('input[type="number"]')].filter((b) => b.min === '').map((b) => b.id);
+  return { ...r, unfloored };
+});
+await page.focus('#pocket-axial');
+await page.keyboard.press('End');
+await page.keyboard.type('-');
+const axial = await page.evaluate(() => document.getElementById('pocket-axial').value);
+console.log('1d. floors:', JSON.stringify(floors), '| minus key in a clearance:', axial);
+if (floors.scale !== '0.01' || floors.radial !== '0' || floors.width !== '1' || floors.slide !== '-3' || floors.turn !== '-4' || axial.includes('-')) throw new Error('number boxes let a negative through, or stopped a slide going negative');
+if (floors.unfloored.join() !== 'wrap-dx,wrap-dy') throw new Error(`number boxes without a floor: ${floors.unfloored.join(', ')}`);
 
 if (!process.env.SMOKE_FROM) { // SMOKE_FROM=8 skips to the picture, puck and neck steps
 // a puck accessory: 18 mm dia x 8 mm, built here so the test needs no fixture file

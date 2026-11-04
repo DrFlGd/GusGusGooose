@@ -30,20 +30,43 @@ type V3 = [number, number, number];
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 // ---------- number boxes: the arrows nudge by 0.1, typing takes down to 0.01 ----------
-// (the step in the markup is overridden here; counts such as ribs or buttons stay whole numbers)
+// (the step in the markup is overridden here; counts such as ribs or buttons stay whole numbers). A box's min and max in
+// the markup hold for typed and pasted values too: sizes, depths and clearances cannot go below zero (or their floor),
+// and only slides, spins, tilts and angles take negatives
 const NUDGE = 0.1, FINE = 0.01;
 const COUNTS = new Set(['cloth-buttons', 'cloth-fabric-pitch', 'cloth-smooth', 'cloth-smooth-model', 'cloth-split-magnets', 'pocket-rib-count']);
 /** A value to two places, without float dust (2.1300000001 → "2.13"). */
 const fine = (v: number) => String(Number((Math.round(v / FINE) * FINE).toFixed(2)));
 function setupNumberBoxes() {
   for (const box of document.querySelectorAll<HTMLInputElement>('input[type="number"]')) {
-    if (COUNTS.has(box.id)) continue;
-    box.step = String(NUDGE);
-    // first in line, so every other handler reads the rounded value
-    box.addEventListener('change', () => { if (box.value !== '' && Number.isFinite(Number(box.value))) box.value = fine(Number(box.value)); });
+    const count = COUNTS.has(box.id);
+    if (!count) box.step = String(NUDGE);
+    // no minus sign where the box cannot go below zero
+    box.addEventListener('keydown', (e) => { if (e.key === '-' && box.min !== '' && Number(box.min) >= 0) e.preventDefault(); });
+    // first in line, so every other handler reads the rounded, clamped value
+    box.addEventListener('change', () => {
+      if (box.value === '' || !Number.isFinite(Number(box.value))) {
+        // typed text the box cannot read (a lone minus, say) reads as empty: back to the floor where a box needs a value
+        if (box.value === '' && box.validity.badInput && box.min !== '' && !box.placeholder) box.value = box.min;
+        return;
+      }
+      let v = Number(box.value);
+      if (box.min !== '') v = Math.max(Number(box.min), v);
+      if (box.max !== '') v = Math.min(Number(box.max), v);
+      box.value = count ? String(Math.round(v)) : fine(v);
+    });
   }
 }
 setupNumberBoxes();
+/** A box's value held to its min and max, for previews that follow each keystroke before the box is clamped on change; NaN when empty. */
+function boxNumber(id: string): number {
+  const box = $<HTMLInputElement>(id);
+  if (box.value === '') return NaN;
+  let v = Number(box.value);
+  if (box.min !== '') v = Math.max(Number(box.min), v);
+  if (box.max !== '') v = Math.min(Number(box.max), v);
+  return v;
+}
 
 // ---------- sliders with a number box ----------
 /**
@@ -1695,7 +1718,7 @@ window.addEventListener('pointerup', () => { painting = false; });
 
 // ---------- the neck band ----------
 function neckOptions(): NeckOptions {
-  const num = (id: string, d: number) => { const v = Number($<HTMLInputElement>(id).value); return Number.isFinite(v) && $<HTMLInputElement>(id).value !== '' ? v : d; };
+  const num = (id: string, d: number) => { const v = boxNumber(id); return Number.isFinite(v) ? v : d; };
   return {
     height: num('neck-height', DEFAULT_NECK.height),
     bandHeight: num('neck-band-h', DEFAULT_NECK.bandHeight),
@@ -1759,7 +1782,7 @@ function ring(color: number): THREE.LineLoop {
 const hemRing = ring(0xf2b84b), neckRing = ring(0x6fb1ff);
 guides.add(hemRing, neckRing);
 function garmentOptions(): Partial<WrapOptions> {
-  const num = (id: string) => Number($<HTMLInputElement>(id).value);
+  const num = (id: string) => { const v = boxNumber(id); return Number.isFinite(v) ? v : 0; };
   return {
     hem: num('cloth-hem'), neck: num('cloth-neck'), thickness: num('cloth-thick'), clearance: num('cloth-clear'),
     collar: $<HTMLSelectElement>('cloth-collar').value as GarmentOptions['collar'], collarGap: num('cloth-gap'), smooth: num('cloth-smooth'),

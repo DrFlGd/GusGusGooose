@@ -53,7 +53,10 @@ single-colour parts). The panel walks each tab
 in numbered steps and every slider has a number box beside it. Number
 boxes have arrows that nudge by 0.1 and take typed values to 0.01 (counts
 such as ribs and buttons stay whole); a slider holds a typed value as well,
-and dragging it moves in its own steps. The pocket
+and dragging it moves in its own steps. Only slides, spins, tilts and
+angles go below zero: sizes, scales, depths and clearances stop at their
+floor (a typed or pasted negative is raised to it, and the minus key does
+nothing there). The pocket
 takes a magnet from a list of common discs (or a typed size, or the
 goose's own void), a fit preset (press, snug, loose, or crush ribs) that
 sets the clearances, and crush ribs: round ridges down the pocket wall,

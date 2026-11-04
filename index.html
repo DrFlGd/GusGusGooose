@@ -50,10 +50,10 @@
                 <option value="ring">Ring (washer)</option>
               </select>
             </div>
-            <div class="field"><span>Width / diameter</span><span class="val"><input type="number" id="gen-w" step="0.5" value="20" /><span class="unit">mm</span></span></div>
-            <div class="field hidden" id="gen-d-row"><span>Depth</span><span class="val"><input type="number" id="gen-d" step="0.5" value="14" /><span class="unit">mm</span></span></div>
-            <div class="field"><span>Height</span><span class="val"><input type="number" id="gen-h" step="0.5" value="8" /><span class="unit">mm</span></span></div>
-            <div class="field hidden" id="gen-i-row"><span>Inner diameter</span><span class="val"><input type="number" id="gen-i" step="0.5" value="12" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Width / diameter</span><span class="val"><input type="number" id="gen-w" min="1" step="0.5" value="20" /><span class="unit">mm</span></span></div>
+            <div class="field hidden" id="gen-d-row"><span>Depth</span><span class="val"><input type="number" id="gen-d" min="1" step="0.5" value="14" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Height</span><span class="val"><input type="number" id="gen-h" min="0.5" step="0.5" value="8" /><span class="unit">mm</span></span></div>
+            <div class="field hidden" id="gen-i-row"><span>Inner diameter</span><span class="val"><input type="number" id="gen-i" min="0.5" step="0.5" value="12" /><span class="unit">mm</span></span></div>
             <div class="row"><button id="generate">Use this base</button></div>
             <p class="muted small">Sized so the magnet pocket fits with 1.5 mm of wall. Fit it, export it and build the decorative part on top in your CAD, or add a decoration STL and it is joined on top.</p>
             <label class="file small">
@@ -101,8 +101,8 @@
               <option value="+x">Right (+X)</option>
             </select>
           </div>
-          <div class="field"><span>Width across the goose</span><span class="val"><input type="number" id="prep-width" step="0.5" placeholder="as is" /><span class="unit">mm</span></span></div>
-          <div class="field"><span>Scale</span><span class="val"><span class="unit">×</span><input type="number" id="prep-scale" step="0.01" value="1" /></span></div>
+          <div class="field"><span>Width across the goose</span><span class="val"><input type="number" id="prep-width" min="1" step="0.5" placeholder="as is" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Scale</span><span class="val"><span class="unit">×</span><input type="number" id="prep-scale" min="0.01" step="0.01" value="1" /></span></div>
           <p class="small muted">25.4 for a model in inches. Ignored when a width is set.</p>
           <div class="field"><span>Centre on</span>
             <select id="prep-centre">
@@ -114,7 +114,7 @@
             <summary>Hollow models: fill the underside</summary>
             <div class="field"><span>Fill depth</span><span class="val"><input type="number" id="prep-fill" step="0.5" min="0" value="0" /><span class="unit">mm</span></span></div>
             <p class="muted small">0 is off. Fills the cavity the walls enclose above the magnet point, from its floor up by this depth, following the walls and never through the top, so a hollow hat has material to carve and to hold the magnet. The fill's floor becomes the base. 8 mm suits a 4.2 mm magnet.</p>
-            <div class="field"><span>Or a plain plug</span><span class="val"><input type="number" id="prep-plug-d" step="0.5" value="0" /><span class="unit">dia</span><input type="number" id="prep-plug-h" step="0.5" value="8" /><span class="unit">high</span></span></div>
+            <div class="field"><span>Or a plain plug</span><span class="val"><input type="number" id="prep-plug-d" min="0" step="0.5" value="0" /><span class="unit">dia</span><input type="number" id="prep-plug-h" min="0" step="0.5" value="8" /><span class="unit">high</span></span></div>
             <p class="muted small">A solid cylinder from the base up into the model, for models with no enclosed cavity to fill.</p>
           </details>
         </div>
@@ -167,7 +167,7 @@
                   <option value="bottom">the bottom edge</option>
                 </select>
               </div>
-              <div class="field"><span>Puck size</span><span class="val"><input type="number" id="flat-puck-d" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="flat-puck-h" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
+              <div class="field"><span>Puck size</span><span class="val"><input type="number" id="flat-puck-d" min="1" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="flat-puck-h" min="0.5" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
               <p id="flat-mount-hint" class="small muted"></p>
             </div>
             <div id="puck-controls">
@@ -184,7 +184,7 @@
                   <option value="behind">the back: the model stands just in front</option>
                 </select>
               </div>
-              <div class="field"><span>Puck size</span><span class="val"><input type="number" id="prep-puck-d" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="prep-puck-h" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
+              <div class="field"><span>Puck size</span><span class="val"><input type="number" id="prep-puck-d" min="1" step="0.5" placeholder="auto" /><span class="unit">dia</span><input type="number" id="prep-puck-h" min="0.5" step="0.5" placeholder="auto" /><span class="unit">high</span></span></div>
               <p id="puck-info" class="small"></p>
             </div>
             <div class="row"><button id="move-mount" disabled>Move the magnet: click the model</button></div>
@@ -232,8 +232,8 @@
                 <option value="custom">Custom size</option>
               </select>
             </div>
-            <div class="field"><span>Diameter</span><span class="val"><input type="number" id="pocket-dia" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
-            <div class="field"><span>Thickness</span><span class="val"><input type="number" id="pocket-thick" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Diameter</span><span class="val"><input type="number" id="pocket-dia" min="0.5" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Thickness</span><span class="val"><input type="number" id="pocket-thick" min="0.2" step="0.1" placeholder="auto" /><span class="unit">mm</span></span></div>
             <p class="small muted">Pick a common disc or type the size; the magnet's own size, not the pocket's.</p>
             <div class="field"><span>Fit</span>
               <select id="pocket-fit">
@@ -244,8 +244,8 @@
                 <option value="custom">Custom</option>
               </select>
             </div>
-            <div class="field"><span>Radial clearance</span><span class="val"><input type="number" id="pocket-radial" step="0.05" placeholder="0" /><span class="unit">mm</span></span></div>
-            <div class="field"><span>Axial clearance</span><span class="val"><input type="number" id="pocket-axial" step="0.05" placeholder="0.1" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Radial clearance</span><span class="val"><input type="number" id="pocket-radial" min="0" step="0.05" placeholder="0" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Axial clearance</span><span class="val"><input type="number" id="pocket-axial" min="0" step="0.05" placeholder="0.1" /><span class="unit">mm</span></span></div>
             <label class="check"><input type="checkbox" id="pocket-ribs" /> Crush ribs on the pocket wall</label>
             <div class="field"><span>Ribs</span><span class="val"><input type="number" id="pocket-rib-count" step="1" min="1" max="12" value="3" /><span class="unit">×, crush</span><input type="number" id="pocket-rib-crush" step="0.05" min="0.05" max="0.5" value="0.15" /><span class="unit">mm</span></span></div>
             <p class="small muted">Ribs are round ridges down the wall, tapered at the mouth, whose tips sit this far inside the magnet; they squash as it goes in, so the pocket can be loose and still grip. On a box pocket one rib per side.</p>
@@ -286,15 +286,15 @@
             <div class="slider-head"><span>Neck height</span><span class="val"><input type="number" id="cloth-neck-num" step="1" min="20" max="175" /><span class="unit">mm</span></span></div>
             <input type="range" id="cloth-neck" min="20" max="175" step="1" value="108" />
           </div>
-          <div class="field"><span>Wall thickness</span><span class="val"><input type="number" id="cloth-thick" step="0.1" value="1.6" /><span class="unit">mm</span></span></div>
-          <div class="field"><span>Clearance to the body</span><span class="val"><input type="number" id="cloth-clear" step="0.05" value="0.4" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Wall thickness</span><span class="val"><input type="number" id="cloth-thick" min="0.4" step="0.1" value="1.6" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Clearance to the body</span><span class="val"><input type="number" id="cloth-clear" min="0" step="0.05" value="0.4" /><span class="unit">mm</span></span></div>
           <div class="field"><span>Collar</span>
             <select id="cloth-collar">
               <option value="tilt">Opens at the front; goes on tilted, beak first</option>
               <option value="drop">Clears head and beak; drops straight on</option>
             </select>
           </div>
-          <div class="field"><span>Extra gap at the neck</span><span class="val"><input type="number" id="cloth-gap" step="0.5" value="1" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Extra gap at the neck</span><span class="val"><input type="number" id="cloth-gap" min="0" step="0.5" value="1" /><span class="unit">mm</span></span></div>
           <div class="field"><span>Spread the collar</span><span class="val"><input type="number" id="cloth-spread" step="0.5" min="0" value="0" /><span class="unit">mm out</span><input type="number" id="cloth-spread-height" step="1" min="1" value="15" /><span class="unit">mm high</span></span></div>
           <details>
             <summary>Neckline and collar</summary>
@@ -305,12 +305,12 @@
                 <option value="crew">Crew (none)</option>
               </select>
             </div>
-            <div class="field"><span>Depth below the neck</span><span class="val"><input type="number" id="cloth-neckline-depth" step="1" value="14" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Depth below the neck</span><span class="val"><input type="number" id="cloth-neckline-depth" min="0" step="1" value="14" /><span class="unit">mm</span></span></div>
             <div class="slider">
               <div class="slider-head"><span>Width</span><span class="val"><input type="number" id="cloth-neckline-width-num" step="5" min="10" max="120" /><span class="unit">°</span></span></div>
               <input type="range" id="cloth-neckline-width" min="10" max="120" step="5" value="45" />
             </div>
-            <div class="field"><span>Collar height above the neck</span><span class="val"><input type="number" id="cloth-collar-height" step="0.5" value="0" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Collar height above the neck</span><span class="val"><input type="number" id="cloth-collar-height" min="0" step="0.5" value="0" /><span class="unit">mm</span></span></div>
             <div class="slider">
               <div class="slider-head"><span>Turn the front</span><span class="val"><input type="number" id="cloth-front-num" step="5" min="-180" max="180" /><span class="unit">°</span></span></div>
               <input type="range" id="cloth-front" min="-180" max="180" step="5" value="0" />
@@ -331,9 +331,9 @@
                 <option value="puffer">Puffer (quilted rows)</option>
               </select>
             </div>
-            <div class="field"><span>Depth</span><span class="val"><input type="number" id="cloth-fabric-depth" step="0.1" value="0.4" /><span class="unit">mm</span></span></div>
-            <div class="field"><span>Ribs around / row height</span><span class="val"><input type="number" id="cloth-fabric-pitch" step="1" value="48" /></span></div>
-            <div class="field"><span>Buttons</span><span class="val"><input type="number" id="cloth-buttons" step="1" min="0" value="0" /><span class="unit">×</span><input type="number" id="cloth-button-dia" step="0.5" value="3" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Depth</span><span class="val"><input type="number" id="cloth-fabric-depth" min="0" step="0.1" value="0.4" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Ribs around / row height</span><span class="val"><input type="number" id="cloth-fabric-pitch" min="1" step="1" value="48" /></span></div>
+            <div class="field"><span>Buttons</span><span class="val"><input type="number" id="cloth-buttons" step="1" min="0" value="0" /><span class="unit">×</span><input type="number" id="cloth-button-dia" min="0.5" step="0.5" value="3" /><span class="unit">mm</span></span></div>
             <label class="check"><input type="checkbox" id="cloth-placket" /> Placket strip down the front</label>
             <div class="field"><span>Ribbed hem band</span><span class="val"><input type="number" id="cloth-hem-band" step="1" min="0" value="0" /><span class="unit">mm</span></span></div>
             <div class="field"><span>Stripes every</span><span class="val"><input type="number" id="cloth-stripes" step="1" min="0" value="0" /><span class="unit">mm</span></span></div>
@@ -351,7 +351,7 @@
             </div>
             <label class="check"><input type="checkbox" id="cloth-form-fit" /> Form fit: hug the chest and under the tail (the halves clip on, so undercuts are fine)</label>
             <div class="field"><span>Magnets per seam</span><span class="val"><input type="number" id="cloth-split-magnets" step="1" min="0" value="3" /></span></div>
-            <div class="field"><span>Discs</span><span class="val"><input type="number" id="cloth-split-magnet-dia" step="0.5" value="3" /><span class="unit">×</span><input type="number" id="cloth-split-magnet-thick" step="0.5" value="1" /><span class="unit">mm</span></span></div>
+            <div class="field"><span>Discs</span><span class="val"><input type="number" id="cloth-split-magnet-dia" min="1" step="0.5" value="3" /><span class="unit">×</span><input type="number" id="cloth-split-magnet-thick" min="0.5" step="0.5" value="1" /><span class="unit">mm</span></span></div>
             <p class="muted small">Pockets face each other across the seam, with 0.3 mm of play on the diameter. Where the wall is too thin for the magnet, a small round pad is added on the outside. Export gives one STL per half.</p>
           </details>
           <details id="wrap-details">
@@ -472,7 +472,7 @@
         <div class="step">
           <h2>Mesh and view</h2>
           <p class="small muted">Every tool paints inside faces, splitting them where a colour edge crosses, the way Bambu Studio paints. Refine is only needed for a smoother shape.</p>
-          <div class="field"><span>Refine: split edges longer than</span><span class="val"><input type="number" id="refine-len" step="0.25" value="1" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Refine: split edges longer than</span><span class="val"><input type="number" id="refine-len" min="0.1" step="0.25" value="1" /><span class="unit">mm</span></span></div>
           <div class="row"><button id="refine">Refine mesh</button></div>
           <p id="paint-info" class="small muted"></p>
           <p class="small muted">Hide goose over the view shows the part on its own, to paint all round it.</p>
@@ -490,15 +490,15 @@
         <div class="step">
           <h2><span class="n">2</span>Magnet</h2>
           <div class="field"><span>Name</span><input type="text" id="hole-name" value="new_point" /></div>
-          <div class="field"><span>Magnet diameter</span><span class="val"><input type="number" id="hole-dia" step="0.1" value="6" /><span class="unit">mm</span></span></div>
-          <div class="field"><span>Magnet thickness</span><span class="val"><input type="number" id="hole-thick" step="0.1" value="3" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Magnet diameter</span><span class="val"><input type="number" id="hole-dia" min="0.5" step="0.1" value="6" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Magnet thickness</span><span class="val"><input type="number" id="hole-thick" min="0.2" step="0.1" value="3" /><span class="unit">mm</span></span></div>
           <div class="field"><span>Mode</span>
             <select id="hole-mode">
               <option value="open">Open (press fit)</option>
               <option value="embedded">Embedded (pause print)</option>
             </select>
           </div>
-          <div class="field hidden" id="skin-row"><span>Skin over the magnet</span><span class="val"><input type="number" id="hole-skin" step="0.1" value="1" /><span class="unit">mm</span></span></div>
+          <div class="field hidden" id="skin-row"><span>Skin over the magnet</span><span class="val"><input type="number" id="hole-skin" min="0" step="0.1" value="1" /><span class="unit">mm</span></span></div>
           <div class="actions">
             <button id="cut-hole" class="primary" disabled>Cut hole</button>
           </div>
