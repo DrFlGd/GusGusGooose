@@ -15,11 +15,5 @@ signed. Click "More info", then "Run anyway". Windows 10 and 11 already
 have WebView2, which the app uses; on an older Windows install it from
 Microsoft (search "WebView2 runtime").
 
-macOS: the app is not signed. Unzip it, then right-click Gus Gus Goose.app
-and choose Open, and Open again. macOS runs a downloaded app from a hidden
-temporary copy until you do this, so the library would land in your user
-data folder; to be sure it stays next to the app, run once in Terminal:
-    xattr -cr "/path/to/Gus Gus Goose/Gus Gus Goose.app"
-
 Linux: make the AppImage executable (chmod +x) and run it. The library is
 kept in the folder the AppImage is in.

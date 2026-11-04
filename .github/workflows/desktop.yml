@@ -1,5 +1,5 @@
 name: Desktop app
-# Builds the portable desktop app for Windows, macOS and Linux. Each is a
+# Builds the portable desktop app for Windows and Linux. Each is a
 # folder or a single file that runs where it is put, with no installer; the
 # library and settings are kept next to it.
 # A push to main whose app version (src-tauri/tauri.conf.json) has no release
@@ -47,8 +47,6 @@ jobs:
         include:
           - platform: windows-latest
             name: windows
-          - platform: macos-latest
-            name: macos
           - platform: ubuntu-22.04
             name: linux
     runs-on: ${{ matrix.platform }}
@@ -59,8 +57,6 @@ jobs:
           node-version: 22
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -88,18 +84,6 @@ jobs:
           Copy-Item "src-tauri/target/release/gusgusgoose.exe" "out/Gus Gus Goose/Gus Gus Goose.exe"
           Copy-Item "docs/PORTABLE.txt" "out/Gus Gus Goose/README.txt"
           Compress-Archive -Path "out/Gus Gus Goose" -DestinationPath "out/Gus-Gus-Goose-${{ steps.v.outputs.v }}-windows-portable.zip"
-
-      # macOS: the .app for Apple silicon and Intel, in a folder
-      - name: Build (macOS)
-        if: matrix.name == 'macos'
-        run: npx tauri build --target universal-apple-darwin --bundles app
-      - name: Zip (macOS)
-        if: matrix.name == 'macos'
-        run: |
-          mkdir -p "out/Gus Gus Goose"
-          cp -R "src-tauri/target/universal-apple-darwin/release/bundle/macos/Gus Gus Goose.app" "out/Gus Gus Goose/"
-          cp docs/PORTABLE.txt "out/Gus Gus Goose/README.txt"
-          cd out && ditto -c -k --sequesterRsrc --keepParent "Gus Gus Goose" "Gus-Gus-Goose-${{ steps.v.outputs.v }}-macos-portable.zip"
 
       # Linux: an AppImage is already one portable file
       - name: Build (Linux)
