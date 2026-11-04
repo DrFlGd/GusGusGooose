@@ -1,0 +1,25 @@
+Gus Gus Goose (portable)
+
+Nothing to install: keep this folder wherever you like (Documents, a USB
+stick, a synced folder) and run the app from it. Your library of saved
+builds is kept next to the app, in "Gus Gus Goose Library", with the
+settings in "Gus Gus Goose settings.json". Copy or move the folder and the
+library goes with it. Settings (the gear at the top right) moves the
+library somewhere else, or back next to the app.
+
+If the app's folder cannot be written to (Program Files, say), the library
+goes to your user data folder instead; Settings shows where.
+
+Windows: SmartScreen may say the app is unrecognised, because it is not
+signed. Click "More info", then "Run anyway". Windows 10 and 11 already
+have WebView2, which the app uses; on an older Windows install it from
+Microsoft (search "WebView2 runtime").
+
+macOS: the app is not signed. Unzip it, then right-click Gus Gus Goose.app
+and choose Open, and Open again. macOS runs a downloaded app from a hidden
+temporary copy until you do this, so the library would land in your user
+data folder; to be sure it stays next to the app, run once in Terminal:
+    xattr -cr "/path/to/Gus Gus Goose/Gus Gus Goose.app"
+
+Linux: make the AppImage executable (chmod +x) and run it. The library is
+kept in the folder the AppImage is in.

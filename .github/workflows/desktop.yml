@@ -1,0 +1,131 @@
+name: Desktop app
+# Builds the portable desktop app for Windows, macOS and Linux. Each is a
+# folder or a single file that runs where it is put, with no installer; the
+# library and settings are kept next to it.
+# A push to main whose app version (src-tauri/tauri.conf.json) has no release
+# yet publishes one, tagged v<version>; so does pushing a v* tag. Run it from
+# the Actions tab to get the zips as artifacts without a release.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      release: ${{ steps.v.outputs.release }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = tag ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"; echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = push ]; then
+            if gh release view "$tag" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+              echo "release=false" >> "$GITHUB_OUTPUT"; echo "build=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "release=true" >> "$GITHUB_OUTPUT"; echo "build=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"; echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            name: windows
+          - platform: macos-latest
+            name: macos
+          - platform: ubuntu-22.04
+            name: linux
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - name: Linux libraries for the webview
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+      - run: npm test
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "v=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Windows: the bare .exe in its own folder (WebView2 comes with Windows 10 and 11)
+      - name: Build (Windows)
+        if: matrix.name == 'windows'
+        run: npx tauri build --no-bundle
+      - name: Zip (Windows)
+        if: matrix.name == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "out/Gus Gus Goose" | Out-Null
+          Copy-Item "src-tauri/target/release/gusgusgoose.exe" "out/Gus Gus Goose/Gus Gus Goose.exe"
+          Copy-Item "docs/PORTABLE.txt" "out/Gus Gus Goose/README.txt"
+          Compress-Archive -Path "out/Gus Gus Goose" -DestinationPath "out/Gus-Gus-Goose-${{ steps.v.outputs.v }}-windows-portable.zip"
+
+      # macOS: the .app for Apple silicon and Intel, in a folder
+      - name: Build (macOS)
+        if: matrix.name == 'macos'
+        run: npx tauri build --target universal-apple-darwin --bundles app
+      - name: Zip (macOS)
+        if: matrix.name == 'macos'
+        run: |
+          mkdir -p "out/Gus Gus Goose"
+          cp -R "src-tauri/target/universal-apple-darwin/release/bundle/macos/Gus Gus Goose.app" "out/Gus Gus Goose/"
+          cp docs/PORTABLE.txt "out/Gus Gus Goose/README.txt"
+          cd out && ditto -c -k --sequesterRsrc --keepParent "Gus Gus Goose" "Gus-Gus-Goose-${{ steps.v.outputs.v }}-macos-portable.zip"
+
+      # Linux: an AppImage is already one portable file
+      - name: Build (Linux)
+        if: matrix.name == 'linux'
+        run: npx tauri build --bundles appimage
+      - name: Collect (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          mkdir -p out
+          cp src-tauri/target/release/bundle/appimage/*.AppImage "out/Gus-Gus-Goose-${{ steps.v.outputs.v }}-linux-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gus-gus-goose-${{ matrix.name }}
+          path: |
+            out/*.zip
+            out/*.AppImage
+          if-no-files-found: error
+      - name: Publish the release
+        if: needs.check.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || needs.check.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Gus Gus Goose ${{ github.ref_type == 'tag' && github.ref_name || needs.check.outputs.tag }}
+          body_path: docs/RELEASE.md
+          files: |
+            out/*.zip
+            out/*.AppImage

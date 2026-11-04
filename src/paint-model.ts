@@ -307,6 +307,15 @@ export class PaintModel {
     this.changed();
   }
 
+  /** Puts back saved paint on the same mesh: every triangle's colour and the trees of those painted in part. */
+  restore(faceMaterial: Uint8Array, trees: Map<number, PaintNode>): void {
+    if (faceMaterial.length !== this.count) throw new Error(`saved paint has ${faceMaterial.length} faces, the part ${this.count}`);
+    this.faceMaterial.set(faceMaterial);
+    this.trees = new Map([...trees].filter(([f]) => f >= 0 && f < this.count));
+    this.all = true;
+    this.changed();
+  }
+
   snapshot(): void {
     for (const t of this.trees.values()) this.frozen.add(t);
     this.history.push({ faceMaterial: Uint8Array.from(this.faceMaterial), trees: new Map(this.trees) });

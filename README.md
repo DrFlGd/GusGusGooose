@@ -7,6 +7,46 @@ with a matching magnet pocket cut in.
 
 The plan, with options, stack, risks and phases, is in [docs/PLAN.md](docs/PLAN.md).
 
+## Desktop app and library
+
+The app also runs as a portable desktop app (Tauri), from the same web
+build: no installer, just a folder (Windows, macOS) or an AppImage (Linux)
+that runs where it is put. Releases are on the repository's Releases page.
+The **Desktop app** workflow publishes one when main is pushed with an app
+version (`src-tauri/tauri.conf.json`) that has no release yet, tagged
+`v<version>`, or when a `v*` tag is pushed; it can also be run by hand from
+the Actions tab (zips as artifacts, no release). Bump the version to release
+again. The builds are
+not signed; `docs/PORTABLE.txt` (README.txt in each zip) says how to get past
+SmartScreen and Gatekeeper. To run it from source you need Rust and the
+Tauri prerequisites for your system: `npm run desktop` (development, live
+reload) or `npm run desktop:build`.
+
+The **Library** tab keeps saved builds. *Save to library* (right column of
+the editor, or Ctrl+S) keeps the model or picture it was made from, every
+setting (each position's placement and mount, the trace settings, the
+palette), the fitted part with its paint, a 3MF of it and a thumbnail of the
+view. Builds are filed under a collection, grouped as holidays (Christmas,
+Halloween…) or categories (Hats, Clothing…), and carry tags and a
+description; the Library searches all of them and filters by tag. *Open in
+editor* loads the file again, puts the settings back, fits again and lays the
+paint back on, so the build can be changed and saved over or saved as new.
+Collections can be added, renamed and removed; builds can be duplicated,
+deleted, given another picture or exported as 3MF without opening them.
+
+On the desktop each build is a folder of plain files in
+`Gus Gus Goose Library` next to the app (with `Gus Gus Goose settings.json`
+beside it), so the app and its builds move or copy together; when the
+app's folder cannot be written (Program Files, a read-only disk, macOS
+running a quarantined app from a temporary copy) both go to the system's
+app data folder instead. Settings (the gear in the top bar) moves the
+library to any folder, taking the builds along or not (to use a library
+already there), puts it back next to the app, or shows it in the file
+manager. Exports go through a Save dialog. In the browser the
+library lives in the browser's own storage (IndexedDB), per browser. A build
+assumes the bundled goose: holes cut on the Hole tab are not part of it.
+`npm run smoke:library` drives the library headlessly.
+
 ## App
 
 `npm run dev` opens the browser app (Vite). Its layout is Print Factory's:
@@ -251,7 +291,8 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/goose-colors.ts` the goose's per-face filament colours
 - `src/fit.ts` the fitting pipeline on [Manifold](https://github.com/elalish/manifold)
 - `src/cli.ts` `detect`, `fit`, `hole`, `shirt` and `wrap` commands
-- `src/web/` the browser app (three.js viewer, panel, same pipeline in Manifold WASM)
-- `scripts/smoke.mjs` headless Playwright run of the built app
+- `src/web/` the browser app (three.js viewer, panel, same pipeline in Manifold WASM); `library-store.ts` and `library-view.ts` the library, `src/part-file.ts` a saved part with its paint
+- `src-tauri/` the desktop shell: the library's file commands and the Save dialog for exports
+- `scripts/smoke.mjs` headless Playwright run of the built app; `scripts/library-smoke.mjs` the same for the library
 - `test/` end-to-end test on a synthetic goose (sphere with four voids)
 - `goose/` the bundled goose model and its fit profile
