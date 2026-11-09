@@ -3,7 +3,7 @@
 // matching a part both files share and carrying the negatives across in
 // that part's frame. Also turns each negative primitive into a magnet point.
 
-import { applyXf, compose, invert, transformMesh, type Part, type Xf } from './threemf.ts';
+import { applyXf, compose, invert, transformMesh, type Part, type Xf } from './threemf-parse.ts';
 import type { IndexedMesh } from './stl.ts';
 import type { MagnetVoid } from './voids.ts';
 import { closestSurfacePoint } from './hole.ts';

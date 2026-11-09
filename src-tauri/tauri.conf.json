@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Gus Gus Goose",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.drflgd.gusgusgoose",
   "build": {
     "beforeDevCommand": "npm run dev",

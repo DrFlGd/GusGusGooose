@@ -163,3 +163,54 @@ function crc32(data: Uint8Array): number {
   for (let i = 0; i < data.length; i++) crc = table[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
+
+export interface BuildObject {
+  name: string;
+  /** the object's parts, each one colour; a slicer loads them as parts of one object */
+  parts: MeshPart[];
+}
+
+/**
+ * A 3MF of several objects on one plate, each made of coloured parts (as
+ * `write3mfParts`), placed where their meshes already are. For a print
+ * project: the goose body with its legs and base as one object, loose parts
+ * (beak, keys, eyes) as their own.
+ */
+export function write3mfBuild(objects: BuildObject[], materials: Material[], name = 'goose'): Uint8Array {
+  const out: string[] = [];
+  out.push('<?xml version="1.0" encoding="UTF-8"?>\n');
+  out.push(MODEL_OPEN);
+  out.push(` <metadata name="Title">${escapeXml(name)}</metadata>\n`);
+  out.push(' <metadata name="Application">Gus Gus Goose fitter</metadata>\n');
+  out.push(' <resources>\n  <basematerials id="1">\n');
+  for (const m of materials) out.push(`   <base name="${escapeXml(m.name)}" displaycolor="${m.color.toUpperCase()}FF" />\n`);
+  out.push('  </basematerials>\n');
+  let id = 1;
+  const items: number[] = [];
+  for (const object of objects) {
+    const partIds: number[] = [];
+    for (const part of object.parts) {
+      const P = part.mesh.positions, T = part.mesh.triangles;
+      id++; partIds.push(id);
+      out.push(`  <object id="${id}" name="${escapeXml(part.name)}" type="model" pid="1" pindex="${part.material}">\n   <mesh>\n    <vertices>\n`);
+      for (let k = 0; k < P.length; k += 3) out.push(`     <vertex x="${f(P[k])}" y="${f(P[k + 1])}" z="${f(P[k + 2])}" />\n`);
+      out.push('    </vertices>\n    <triangles>\n');
+      for (let k = 0; k < T.length; k += 3) {
+        const m = part.faceMaterial?.[k / 3];
+        out.push(m === undefined || m === part.material
+          ? `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" />\n`
+          : `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" pid="1" p1="${m}" />\n`);
+      }
+      out.push('    </triangles>\n   </mesh>\n  </object>\n');
+    }
+    if (partIds.length === 1) { items.push(partIds[0]); continue; }
+    id++; items.push(id);
+    out.push(`  <object id="${id}" name="${escapeXml(object.name)}" type="model">\n   <components>\n`);
+    for (const p of partIds) out.push(`    <component objectid="${p}" />\n`);
+    out.push('   </components>\n  </object>\n');
+  }
+  out.push(' </resources>\n <build>\n');
+  for (const i of items) out.push(`  <item objectid="${i}" />\n`);
+  out.push(' </build>\n</model>\n');
+  return packageOf(new TextEncoder().encode(out.join('')));
+}

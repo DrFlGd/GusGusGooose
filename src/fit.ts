@@ -77,12 +77,10 @@ export interface FitResult {
   warnings: string[];
 }
 
-let wasm: ManifoldToplevel | null = null;
-export async function manifold(): Promise<ManifoldToplevel> {
-  if (!wasm) {
-    wasm = await Module();
-    wasm.setup();
-  }
+// one engine for everyone: callers that start together must share it, or their solids cannot be mixed
+let wasm: Promise<ManifoldToplevel> | null = null;
+export function manifold(): Promise<ManifoldToplevel> {
+  if (!wasm) wasm = Module().then((m) => { m.setup(); return m; });
   return wasm;
 }
 
