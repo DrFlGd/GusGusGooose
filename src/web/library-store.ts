@@ -14,7 +14,9 @@ export interface BuildMeta {
   collection: string;
   /** what was made: an accessory from a model, one from a picture, or a garment */
   kind: 'model' | 'picture' | 'garment';
-  /** the position on the goose (head, left_wing, neck…), '' for a garment */
+  /** the character it was made for ('goose' when absent, as builds saved before the otter) */
+  character?: string;
+  /** the position on the character (head, left_wing, chest, neck…), '' for a garment */
   point: string;
   /** the file it was made from, as loaded ('' for a shirt made from nothing) */
   sourceName: string;

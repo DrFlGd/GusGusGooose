@@ -471,6 +471,76 @@ own magnet in, pins through the base and legs as before. Tolerances to tune
 from a print: channel over the magnet (0.15 mm a side), key under the
 channel (0.2), key short of the magnet's travel (1), pocket clearance (0.15).
 
+## The sea otter (Jerred, 2026-11-09)
+
+Jerred sent his "Otter Solid Eyes - sized" model (68 x 101 x 125 mm, 191,724
+triangles, standing on z, facing -y) with the concept art sheet for a
+"Collectible Desk Animal Series: Sea Otter", and asked for it painted from
+the art as a 3MF, magnets of the goose's size in the top of the head and
+the chest between the paws with slide-in channels from the bottom and keys
+as on the goose, the base cropped flat, and the otter in the app as a
+second character to make accessories for. The source is
+`characters/otter/otter-source.stl`; `npm run build-otter` (src/build-otter.ts,
+geometry in src/otter.ts) makes `goose/otter.stl`, `otter-colors.json` and
+`otter-profile.json`, which the app serves beside the goose.
+
+**Paint.** Three colours sampled from the art's palette swatches: dark
+brown `#65321c` (filament 1, the object's own), light brown `#e99c60` (2),
+black (3). The model is one smooth shell with no separate parts, so the
+colours come from its sculpt: a watershed over the surface from seed rays
+(face, belly, back of the head light; back, sides, paws, feet, tail, ears
+dark; eyes and nose black), flooding in order of curvature so the regions
+meet on the creases the sculpt has there (the tufted neckline and belly
+edge, the eye and nose rims). The freckles are the small sharp bumps on the
+cheeks, painted as round dots; the smile is the groove under the nose,
+widened by one ring of triangles so it reads in print; a two-pass mode
+filter takes the spikes off every border. Whole-triangle paint, written as
+`paint_color` codes like the goose app's exports (filament 2 = "8", 3 = "0C").
+
+**Base.** The otter stood on its tail tip (z 0.05), its feet (0.6) and its
+belly (1.5), 931 mm2 at 0.5 mm. It is upright already (centre of mass over
+the footing), so no rotation: 2.5 mm comes off the bottom, which gives
+2,951 mm2 of flat footing in two pieces (body with feet, and tail) and
+keeps the feet round. Cutting at 4 mm would join them but flattens half the
+feet. The cut faces are dark brown.
+
+**Seats.** The goose's 10.2 x 4.2 mm disc seats, with at least 1.2 mm of
+plastic over the magnet everywhere (rays across the face): the head's under
+the highest point of the head (34, 42.5), axis up, 1.87 mm at the centre;
+the chest's at x 34, 62 mm up after the trim, axis square to the chest
+there (forward and 23 degrees up, a least-squares plane), 1.75 mm at the
+centre. The chest between the paws is only about 12 mm wide, so a chest
+accessory sits between or over the paws (the fit carves it round them).
+
+**Channels** (`OTTER_MOUTHS`, scanned the way the goose's were: one
+opening, nothing else within 1.2 mm of the skin, the channels never meet):
+- chest: from the seat down and back (17 degrees) to the body's footing at
+  (34, 45), behind the gap between the feet. Straight down it broke out of
+  the belly between the feet, which curves up to 4 mm above the desk.
+- head: down the middle of the body to the root of the tail at (34, 70.5),
+  13 degrees back, so it passes behind the chest channel (they stay more
+  than 5 mm apart). At 70 the bore's corner nicked the groove between body
+  and tail; at 71 the wall behind it at the tail's root went under 1.6 mm.
+- Both use `buildChannel` from the goose (flat or swept bore, the same
+  clearances), with no drop and no tongue: nothing covers these mouths but
+  the desk. The keys are trimmed flush with the base.
+- Keys: flat bars lying on a side by default (head 114 mm long, 12.7 cm3;
+  chest 55 mm, 5.6 cm3). "Upright" and "swept" keys stand on the end that is
+  part of the base, so it has the plate finish, leaning like their channels:
+  the head key wants a brim.
+
+**App.** A Character picker in the top bar (remembered per browser) loads
+the goose or the otter: the STL, colours and profile from
+`src/characters.ts`. Positions, the fit and the slide-in build belong to the
+character; a loaded accessory stays and is made again for the new first
+position. The otter has no clothing or neck band (both are shaped for the
+goose's long neck): the Clothing tab is disabled and the neck position
+hidden. The print tab is named after the character; for the otter it builds
+`buildOtterSlots` from the otter in the view and exports the painted print.
+The profile carries `forward` (-y) for the otter, which the neck code and
+the default spin use where the goose has a beak. Library builds record their
+character and reopen on it.
+
 ## Still needed from Jerred
 
 - [ ] The goose base STL with the magnet voids in it, the exact file sliced from. It gets bundled into the app at `goose/goose.stl`.

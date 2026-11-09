@@ -4,6 +4,7 @@
 // description, collection and tags, and opens it in the editor again.
 
 import { dialog, h } from './prepare-image.ts';
+import { characterOf } from '../characters.ts';
 import { KIND_WORDS, libraryStore, matches, newId, parseTags, pointWords, safeName, type BuildMeta, type Collection } from './library-store.ts';
 
 export { matches, parseTags };
@@ -228,7 +229,7 @@ export class LibraryView {
           this.thumbImg(m, ''),
           h('span', { class: 'lib-card-body' },
             h('span', { class: 'lib-card-name' }, m.name || 'Untitled'),
-            h('span', { class: 'lib-card-sub' }, [this.collectionName(m.collection), m.point ? pointWords(m.point) : KIND_WORDS[m.kind]].filter(Boolean).join(' · ')),
+            h('span', { class: 'lib-card-sub' }, [this.collectionName(m.collection), m.character && m.character !== 'goose' ? characterOf(m.character).name : '', m.point ? pointWords(m.point) : KIND_WORDS[m.kind]].filter(Boolean).join(' · ')),
             m.tags.length ? h('span', { class: 'lib-card-tags' }, ...m.tags.slice(0, 4).map((t) => h('span', { class: 'lib-tag small' }, t))) : null),
           m.id === current ? h('span', { class: 'lib-badge' }, 'Open') : null);
         card.onclick = () => { this.selected = m.id; this.renderGrid(); this.renderDetail(); };
@@ -286,7 +287,7 @@ export class LibraryView {
     };
     const info = [
       ['Made from', m.sourceName || (m.kind === 'garment' ? 'the goose body (a plain shirt)' : '—')],
-      ['Kind', KIND_WORDS[m.kind] + (m.point ? `, on the ${pointWords(m.point)}` : '')],
+      ['Kind', KIND_WORDS[m.kind] + (m.point ? `, on the ${characterOf(m.character).word}'s ${pointWords(m.point)}` : '')],
       ['Fitted part', m.fitted ? `${(m.faces ?? 0).toLocaleString()} faces` : 'not fitted yet'],
       ['Created', when(m.created)],
       ['Last edited', when(m.updated)],

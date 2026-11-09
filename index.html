@@ -9,13 +9,19 @@
 <body>
   <div id="app" class="app">
     <header class="top">
-      <div class="title"><h1>Gus Gus Goose</h1><span class="subtitle">fit, dress and paint the desk goose</span></div>
+      <div class="title"><h1>Gus Gus Goose</h1><span class="subtitle" id="subtitle">fit, dress and paint the desk goose</span></div>
+      <label class="character" title="The desk character to make accessories for"><span class="muted small">Character</span>
+        <select id="character">
+          <option value="goose" selected>Goose</option>
+          <option value="otter">Sea otter</option>
+        </select>
+      </label>
       <nav class="tabs segmented" aria-label="Mode">
         <button data-tab="accessory" class="active">Accessory</button>
-        <button data-tab="clothing">Clothing</button>
+        <button data-tab="clothing" id="clothing-tab-button">Clothing</button>
         <button data-tab="paint" id="paint-tab-button" disabled title="Load an accessory or make a garment first">Paint</button>
         <button data-tab="hole">Hole</button>
-        <button data-tab="goose" title="The goose printed without pauses: magnets slide in after printing">Goose</button>
+        <button data-tab="goose" id="print-tab-button" title="The goose printed without pauses: magnets slide in after printing">Goose</button>
         <button data-tab="library" id="library-tab-button" title="Saved builds by holiday and category">Library</button>
       </nav>
       <div class="top-actions">
@@ -94,7 +100,7 @@
 
         <div id="prepare-controls" class="step hidden">
           <h2><span class="n">2</span>Prepare</h2>
-          <div class="field"><span>Side that meets the goose</span>
+          <div class="field"><span>Side that meets the <span class="cw">goose</span></span>
             <select id="prep-down">
               <option value="-z">Bottom (−Z, as downloaded)</option>
               <option value="+z">Top (+Z, flip it over)</option>
@@ -104,7 +110,7 @@
               <option value="+x">Right (+X)</option>
             </select>
           </div>
-          <div class="field"><span>Width across the goose</span><span class="val"><input type="number" id="prep-width" min="1" step="0.5" placeholder="as is" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Width across the <span class="cw">goose</span></span><span class="val"><input type="number" id="prep-width" min="1" step="0.5" placeholder="as is" /><span class="unit">mm</span></span></div>
           <div class="field"><span>Scale</span><span class="val"><span class="unit">×</span><input type="number" id="prep-scale" min="0.01" step="0.01" value="1" /></span></div>
           <p class="small muted">25.4 for a model in inches. Ignored when a width is set.</p>
           <div class="field"><span>Centre on</span>
@@ -160,7 +166,7 @@
               </div>
               <div class="field"><span>Puck to the picture</span>
                 <select id="flat-orientation">
-                  <option value="flat">parallel: the picture lies on the goose</option>
+                  <option value="flat">parallel: the picture lies on the <span class="cw">goose</span></option>
                   <option value="standing">perpendicular: the picture stands up</option>
                 </select>
               </div>
@@ -191,7 +197,7 @@
               <p id="puck-info" class="small"></p>
             </div>
             <div class="row"><button id="move-mount" disabled>Move the magnet: click the model</button></div>
-            <p id="mount-info" class="small muted">Auto sizes the puck to the magnet and the sink. Click Move, then the model where the magnet should be; Hide goose over the view shows the model on its own.</p>
+            <p id="mount-info" class="small muted">Auto sizes the puck to the magnet and the sink. Click Move, then the model where the magnet should be; Hide <span class="cw">goose</span> over the view shows the model on its own.</p>
           </details>
           <div id="stand-row">
             <div class="field"><span>Stands</span>
@@ -203,7 +209,7 @@
             <p id="stand-info" class="small muted"></p>
           </div>
           <div class="slider">
-            <div class="slider-head"><span>Sink into the goose</span><span class="val"><input type="number" id="sink-num" step="0.5" min="0" max="15" /><span class="unit">mm</span></span></div>
+            <div class="slider-head"><span>Sink into the <span class="cw">goose</span></span><span class="val"><input type="number" id="sink-num" step="0.5" min="0" max="15" /><span class="unit">mm</span></span></div>
             <input type="range" id="sink" min="0" max="15" step="0.5" value="2" />
           </div>
           <p class="small muted">Click the model in the view for rotation rings: drag the red or green ring to tilt it, the blue one to spin it. Click empty space to hide them.</p>
@@ -231,7 +237,7 @@
             <summary>Pocket and clearance</summary>
             <div class="field"><span>Magnet</span>
               <select id="pocket-preset">
-                <option value="auto">Same as the goose's void</option>
+                <option value="auto">Same as the <span class="cw">goose</span>'s void</option>
                 <option value="custom">Custom size</option>
               </select>
             </div>
@@ -259,7 +265,7 @@
             </div>
           </details>
           <div class="actions">
-            <button id="fit" class="primary">Fit to the goose</button>
+            <button id="fit" class="primary">Fit to the <span class="cw">goose</span></button>
           </div>
           <p id="fit-result" class="small"></p>
         </div>
@@ -478,7 +484,7 @@
           <div class="field"><span>Refine: split edges longer than</span><span class="val"><input type="number" id="refine-len" min="0.1" step="0.25" value="1" /><span class="unit">mm</span></span></div>
           <div class="row"><button id="refine">Refine mesh</button></div>
           <p id="paint-info" class="small muted"></p>
-          <p class="small muted">Hide goose over the view shows the part on its own, to paint all round it.</p>
+          <p class="small muted">Hide <span class="cw">goose</span> over the view shows the part on its own, to paint all round it.</p>
         </div>
 
       </section>
@@ -487,7 +493,7 @@
       <section id="tab-hole" class="tab hidden">
         <div class="step">
           <h2><span class="n">1</span>Pick a spot for a magnet hole</h2>
-          <p class="small muted">Click the goose. The hole follows the surface normal there.</p>
+          <p class="small muted">Click the <span class="cw">goose</span>. The hole follows the surface normal there.</p>
           <p id="pick" class="small">No spot picked.</p>
         </div>
         <div class="step">
@@ -508,9 +514,9 @@
           <p id="hole-result" class="small"></p>
         </div>
         <div class="step">
-          <h2><span class="n">3</span>Export the goose</h2>
+          <h2><span class="n">3</span>Export the <span class="cw">goose</span></h2>
           <div class="row">
-            <button id="export-goose">Goose STL</button>
+            <button id="export-goose"><span class="cw cap">Goose</span> STL</button>
             <button id="export-profile">Profile JSON</button>
           </div>
         </div>
@@ -520,11 +526,12 @@
       <section id="tab-goose" class="tab hidden">
         <div class="step">
           <h2><span class="n">1</span>Slide-in magnets</h2>
-          <p class="small muted">The goose printed without pauses. Each body magnet slides up a channel into its seat after printing, and a white key closes the channel behind it: the head's channel opens on the face under the beak, the wings' on the belly behind the legs. The beak's own magnet slides in from its back as before. The seats stay where the fit profile has them, so every accessory still aligns.</p>
+          <p class="small muted" data-character="goose">The goose printed without pauses. Each body magnet slides up a channel into its seat after printing, and a white key closes the channel behind it: the head's channel opens on the face under the beak, the wings' on the belly behind the legs. The beak's own magnet slides in from its back as before. The seats stay where the fit profile has them, so every accessory still aligns.</p>
+          <p class="small muted hidden" data-character="otter">The otter printed without pauses. Each magnet slides up a channel from the flat base into its seat after printing, and a dark brown key fills the channel behind it, flush with the base: the head's channel runs up the middle of the body from the root of the tail, the chest's from just behind the feet. The seats stay where the fit profile has them, so every accessory still aligns.</p>
           <div class="field"><span>Version</span>
             <select id="slots-version">
               <option value="side" selected>Flat bore, keys print on their side</option>
-              <option value="upright">Flat bore, belly keys print upright</option>
+              <option value="upright">Flat bore, keys print upright</option>
               <option value="swept">Swept channel, six-sided keys</option>
             </select>
           </div>
@@ -536,7 +543,7 @@
           <div class="field"><span>Key under the channel</span><span class="val"><input type="number" id="slots-key-clear" min="0" step="0.05" value="0.2" /><span class="unit">mm/side</span></span></div>
           <div class="field"><span>Key short of the magnet</span><span class="val"><input type="number" id="slots-gap" min="0" step="0.5" value="1" /><span class="unit">mm</span></span></div>
         </div>
-        <div class="step">
+        <div class="step" data-character="goose">
           <h2><span class="n">3</span>Beak key</h2>
           <label class="check small"><input type="checkbox" id="slots-tongue" checked /> The head key stands proud of the face with a tongue that registers in a pocket in the beak, so the beak glues on square.</label>
           <div class="field"><span>Tongue stands proud</span><span class="val"><input type="number" id="slots-proud" min="0" step="0.5" value="1.5" /><span class="unit">mm</span></span></div>
@@ -544,14 +551,14 @@
           <div class="field"><span>Tongue</span><span class="val"><input type="number" id="slots-tongue-w" min="1" step="0.5" value="6" /><span class="unit">wide</span><input type="number" id="slots-tongue-h" min="1" step="0.5" value="2" /><span class="unit">tall</span></span></div>
         </div>
         <div class="step">
-          <h2><span class="n">4</span>Build and export</h2>
+          <h2><span class="n" id="slots-build-step">4</span>Build and export</h2>
           <div class="actions"><button id="build-slots" class="primary">Build</button></div>
           <p id="slots-result" class="small">Not built yet.</p>
           <label class="check small"><input type="checkbox" id="slots-show-keys" checked /> Show the keys in place</label>
-          <label class="check small"><input type="checkbox" id="slots-show-beak" checked /> Show the beak</label>
+          <label class="check small" data-character="goose"><input type="checkbox" id="slots-show-beak" checked /> Show the beak</label>
           <label class="check small"><input type="checkbox" id="slots-show-magnets" checked /> Show the magnets</label>
           <div class="export">
-            <button id="export-slots-3mf" class="export-btn" disabled><span>Print 3MF</span><small>Goose with base and legs in place; beak, keys and eyes laid flat beside it, colours as filaments</small></button>
+            <button id="export-slots-3mf" class="export-btn" disabled><span>Print 3MF</span><small data-character="goose">Goose with base and legs in place; beak, keys and eyes laid flat beside it, colours as filaments</small><small data-character="otter" class="hidden">The painted otter standing on its base, the keys beside it; dark brown is filament 1, light brown 2, black 3</small></button>
             <button id="export-slots-stl" class="export-btn" disabled><span>Parts as STL (zip)</span><small>One file per part, same layout</small></button>
           </div>
         </div>
@@ -574,10 +581,10 @@
           <button id="view-top" class="icon" title="From above">Top</button>
           <button id="view-fit" class="icon" title="Frame the part">Fit</button>
           <span class="sep"></span>
-          <button id="focus" class="icon" title="Hide the goose and frame the part" aria-pressed="false">Hide goose</button>
+          <button id="focus" class="icon" title="Hide the character and frame the part" aria-pressed="false">Hide goose</button>
         </div>
       </div>
-      <p id="status" class="status">Loading goose…</p>
+      <p id="status" class="status">Loading…</p>
     </section>
     <aside class="side right" aria-label="Export">
       <div id="library-detail" class="hidden"></div>
@@ -613,7 +620,7 @@
         <ul id="points"></ul>
       </section>
       <section id="goose-colours-section" class="group-static hidden">
-        <h2 class="panel-title">Goose colours</h2>
+        <h2 class="panel-title"><span class="cw cap">Goose</span> colours</h2>
         <div id="goose-colours"></div>
       </section>
       </div>

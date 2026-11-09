@@ -1,0 +1,68 @@
+{
+  "clearance": 0.2,
+  "pocketRadialClearance": 0,
+  "pocketAxialClearance": 0.1,
+  "points": {
+    "head": {
+      "center": [
+        34,
+        42.5,
+        122.5
+      ],
+      "floor": [
+        34,
+        42.5,
+        116.42857291529212
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "mode": "embedded",
+      "faceCenter": [
+        34,
+        42.5,
+        120.62857291529212
+      ],
+      "skin": 1.8714270847078787,
+      "diameter": 10.2,
+      "depth": 4.2,
+      "shape": "cylinder",
+      "wallFaces": 0
+    },
+    "chest": {
+      "center": [
+        34,
+        21.930805462767225,
+        62.00000000000001
+      ],
+      "floor": [
+        34,
+        27.422529912889907,
+        59.70721029085467
+      ],
+      "axis": [
+        0,
+        -0.9228039852460747,
+        0.38526978185936467
+      ],
+      "mode": "embedded",
+      "faceCenter": [
+        34,
+        23.54675317485639,
+        61.325343374664
+      ],
+      "skin": 1.751127799538338,
+      "diameter": 10.2,
+      "depth": 4.2,
+      "shape": "cylinder",
+      "wallFaces": 0
+    }
+  },
+  "forward": [
+    0,
+    -1,
+    0
+  ]
+}
