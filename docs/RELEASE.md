@@ -1,12 +1,12 @@
-Gus Gus Goose 0.2.0: the goose printed without pauses. Every body magnet now slides into its seat after printing, through a channel closed by a flat white key, and the beak locates on the head key instead of being glued on by eye.
+Gus Gus Goose 0.3.0: the sea otter joins the goose. Pick the character in the top bar, and every accessory tool works on the otter too.
 
-**Goose tab.** Build the slide-in goose in the app and export it as a print 3MF (body, base and legs in place; beak, keys and eyes laid flat beside it, colours as filaments) or a zip of STLs. The magnet seats do not move, so every accessory fitted so far still aligns.
+**The sea otter.** Painted from its concept art: a dark brown body, paws, feet, tail and ears, a light brown head and belly, and black eyes, nose, smile and freckles. The bottom is trimmed 2.5 mm so it stands flat on a desk, and the feet stay round.
 
-- **Head:** the channel drops 3 mm under the seat, then runs forward to the face under the beak. Its key carries a 6 x 2 mm tongue, 1.5 mm proud, that registers in a pocket in the beak.
-- **Wings:** the channels run from each seat down and inward to the belly just behind the legs, where the stance hides the mouths. The legs are too thin to hide a mouth, and a slot straight down breaks out of the side, which is why.
-- **Beak:** its magnet slides in from the back as before; the beak now prints loose in orange.
-- **Three versions:** flat bore with keys printed on their side (default); flat bore with the belly keys printed upright, so their outer face has the belly's own layer lines; or the magnet's own shape swept along the channel, with six-sided keys.
-- **Tolerances as controls:** channel over the magnet, key under the channel, key short of the magnet, tongue height and pocket clearance.
+- **Magnets:** the goose's 10 x 4 mm discs, one in the top of the head and one on the chest between the paws, each under at least 1.2 mm of plastic.
+- **Slide-in from the base:** both magnets go in after printing, through channels that open in the flat base. The chest channel slopes back to just behind the feet; the head channel runs up the middle from the root of the tail. A dark brown key fills each channel, flush with the base.
+- **Otter tab:** builds the slide-in otter with the same three versions and tolerance controls as the goose. Its Print 3MF is painted: dark brown is filament 1, light brown 2, black 3, with the keys beside the otter. The head key is 114 mm long; if you print it standing, give it a brim.
+- **Accessories:** fit, paint and export accessories on the otter's head and chest as on the goose. Clothing and the neck band stay goose-only, since they are shaped for its long neck.
+- **Library:** saved builds remember their character and reopen on it.
 
 **Portable, no installer.** Download the file for your system, unzip it where you want the app to live, and run it. Saved builds go in `Gus Gus Goose Library` next to the app; Settings (the gear) can move the library.
 
