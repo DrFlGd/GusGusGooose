@@ -1,6 +1,6 @@
 [package]
 name = "gusgusgoose"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fit, dress and paint the Gus Gus desk goose, with a library of saved builds"
 edition = "2021"
 rust-version = "1.77"
