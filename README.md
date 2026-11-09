@@ -231,6 +231,9 @@ npm install
 # 0. rebuild goose/goose.stl and goose/profile.json from the project 3MFs (only when the goose changes)
 node src/build-goose.ts goose/goose.3mf goose/goose.stl --voids goose/goose-voids.3mf
 
+# 0b. the slide-in-magnet print: body with channels, keys, loose beak and eyes (docs/PLAN.md, "Slide-in magnets")
+node src/build-slots.ts --out goose/goose-slots.3mf
+
 # 1. find cylindrical magnet voids in a model, write goose/profile.json
 #    (GOOSE_DEBUG=1 prints why each candidate patch was rejected)
 npm run detect -- goose/goose.stl
@@ -274,6 +277,7 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 
 - `src/threemf.ts` reads a 3MF project (parts, transforms, negative parts)
 - `src/build-goose.ts` unions the 3MF parts into the one goose solid, cutting the mapped voids
+- `src/slots.ts`, `src/build-slots.ts` slide-in magnet channels from each seat to a covered mouth, their keys, and the print 3MF; `src/render.ts` draws solids to PNG
 - `src/map-voids.ts` carries negative parts from one 3MF onto another and turns them into magnet points
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose

@@ -20,6 +20,7 @@
     "fit": "node src/cli.ts fit",
     "hole": "node src/cli.ts hole",
     "build-goose": "node src/build-goose.ts goose/goose.3mf goose/goose.stl --voids goose/goose-voids.3mf",
+    "build-slots": "node src/build-slots.ts --out goose/goose-slots.3mf",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc -p ."
   },

@@ -392,6 +392,49 @@ hat to fit straight up but sometimes following the head tilt is ideal."
   wing 8.2°, beak 3.3°. The magnet pocket stays square to the magnet. The
   neck band has no such choice.
 
+## Slide-in magnets (Jerred, 2026-11-09)
+
+Pausing the print to drop magnets into the voids is a nuisance, so the goose
+gets a channel from each magnet seat to a mouth on the surface that another
+part covers. The seats themselves are untouched, so every fitted accessory
+still aligns: `goose/goose.stl` and `goose/profile.json` do not change, and
+`test/slots.test.ts` checks the seats' outer faces stay where the profile
+has them. `node src/build-slots.ts` writes `goose/goose-slots.3mf`: the body,
+base and legs as one object (pins and channels already cut), and the loose
+parts laid flat beside it.
+
+Which seat can be reached from where (scanned over the body with the mouth
+required to open once, with nothing of the channel within 0.8 mm of the skin
+elsewhere):
+
+- **Head**: from the face, where the beak sits. The seat's own rim is only
+  0.5 mm under the skin on the goose's right, so a channel leaving at the
+  seat's height breaks the forehead; the channel first drops 3 mm straight
+  down (a snug 10.5 mm bore, the magnet's final travel), then runs 16 mm
+  forward and down to the face. The mouth is 12.6 x 6.6 mm, within the beak's
+  footprint except for slivers at the sides. The eye pins' seats are clear.
+  A white key fills the channel behind the magnet and the beak glues over it.
+- **Wings**: not from the legs. A leg is 4 mm across where it meets the body,
+  the mouth is 14 x 7 mm, and the body narrows so fast below a wing that a
+  channel straight down in the seat's plane breaks out of the side 10 mm
+  down. The channel instead runs from the seat down and inward, 49 mm, to the
+  belly just behind and inboard of that leg, where the stance hides it and
+  the leg pins are missed. The bore is 7.3 mm through the seat's thickness
+  because the magnet travels obliquely to its own faces; it only becomes
+  snug at the seat. A white key fills each channel and sits flush.
+- **Beak**: nothing to do. Its magnet already slides in from the back face
+  along a slot (`slots` in the profile); the beak is printed on its own in
+  orange, loaded, and glued to the face over the head key.
+- Legs and base stay printed in place with the body, so the print still
+  stands on its base. The beak and eyes come off the body and print loose.
+
+Assembly: slide each magnet up its channel (an accessory or a spare magnet
+held on the outside pulls it into the seat; a dab of glue on its outer face
+first), push the key in behind it, glue the beak on with its own magnet in,
+pins through the base and legs as before. Geometry in `src/slots.ts`
+(`buildChannel`: the seat swept along a polyline with 0.15 mm clearance per
+side, the key 0.2 mm smaller and stopping 1 mm short of the seat).
+
 ## Still needed from Jerred
 
 - [ ] The goose base STL with the magnet voids in it, the exact file sliced from. It gets bundled into the app at `goose/goose.stl`.
