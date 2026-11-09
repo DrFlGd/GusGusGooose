@@ -1,5 +1,6 @@
-// Browser UI around the fitting pipeline: the goose with its magnet points,
-// an accessory placed at one of them, Fit, export. Plus the magnet-hole tool.
+// Browser UI around the fitting pipeline: a desk character (the goose, or
+// the sea otter) with its magnet points, an accessory placed at one of them,
+// Fit, export. Plus the magnet-hole tool and the slide-in-magnet print.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -24,10 +25,12 @@ import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, typ
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
-import { write3mf, write3mfBuild, write3mfParts, zipStore, type Material } from '../threemf-write.ts';
+import { write3mf, write3mfBuild, write3mfParts, zipStore, type BuildObject, type Material } from '../threemf-write.ts';
 import { parse3mf, type Part } from '../threemf-parse.ts';
 import { buildSlots, layoutBuild, type SlotsBuild } from '../slots-build.ts';
 import { DEFAULT_SLOTS, type SlotOptions } from '../slots.ts';
+import { buildOtterSlots, layoutOtter, otterPaint, type OtterSlotsBuild } from '../otter.ts';
+import { characterOf, CHARACTERS, type Character } from '../characters.ts';
 import { splitByMaterial } from '../split-colours.ts';
 import { PaintState } from './paint.ts';
 import { faceIdMap } from './pick.ts';
@@ -216,6 +219,8 @@ let gooseMaterials: Material[] = [{ name: 'Goose', color: '#e9dcc3' }];
 let gooseFaceMaterial: Uint8Array | null = null;
 let gooseFirstID = 0;
 let gooseFallback = 0;
+/** the desk character in the view; the goose* names above hold whichever it is */
+let character: Character = CHARACTERS.goose;
 // the loaded model before preparation, and how it is prepared
 let rawModel: ManifoldT | null = null;
 let rawName = '';
@@ -246,16 +251,44 @@ let pickMarker: THREE.Object3D | null = null;
 
 const status = (s: string) => { $('status').textContent = s; $('library-status').textContent = s; };
 
+const CHARACTER_KEY = 'gus-gus-goose.character';
+function storedCharacter(): string | null { try { return localStorage.getItem(CHARACTER_KEY); } catch { return null; } }
+
 async function init() {
+  await loadCharacter(storedCharacter() ?? 'goose');
+}
+
+let characterSerial = 0;
+/** the character whose solid, colours and points are all in place ('' while one loads) */
+let characterReady = '';
+/**
+ * Loads a desk character: its solid, colours and magnet points. Whatever was
+ * fitted to the last one, its positions and its slide-in build go; a loaded
+ * accessory or picture stays and is made again for the new first position.
+ */
+async function loadCharacter(id: string) {
+  const c = characterOf(id);
+  const serial = ++characterSerial;
+  status(`Loading the ${c.word}…`);
+  const base = import.meta.env.BASE_URL;
   const [stl, prof, colors] = await Promise.all([
-    fetch(import.meta.env.BASE_URL + 'goose.stl').then((r) => r.arrayBuffer()),
-    fetch(import.meta.env.BASE_URL + 'profile.json').then((r) => (r.ok ? r.json() : { ...DEFAULT_PROFILE, points: {} })),
-    fetch(import.meta.env.BASE_URL + 'goose-colors.json').then((r) => (r.ok ? (r.json() as Promise<GooseColors>) : null)).catch(() => null),
+    fetch(base + c.files.stl).then((r) => { if (!r.ok) throw new Error(`${c.files.stl} is not served`); return r.arrayBuffer(); }),
+    fetch(base + c.files.profile).then((r) => (r.ok ? r.json() : { ...DEFAULT_PROFILE, points: {} })),
+    fetch(base + c.files.colors).then((r) => (r.ok ? (r.json() as Promise<GooseColors>) : null)).catch(() => null),
   ]);
+  if (serial !== characterSerial) return;
+  characterReady = '';
+  const switching = !!gooseObject;
+  if (switching) clearFitted();
+  character = c;
+  try { localStorage.setItem(CHARACTER_KEY, c.id); } catch { /* the choice is only a convenience */ }
   gooseMesh = parseStl(stl);
   profile = prof;
+  gooseMaterials = [{ name: c.name, color: '#e9dcc3' }];
+  gooseFaceMaterial = null;
+  gooseFallback = 0;
   if (colors && colors.materials.length) {
-    gooseMaterials = colors.materials;
+    gooseMaterials = colors.materials.map((m) => ({ ...m }));
     gooseFaceMaterial = expandRuns(colors, gooseMesh.triangles.length / 3);
     // the fallback for faces a cut creates: the material with the most faces
     const counts = new Array<number>(gooseMaterials.length).fill(0);
@@ -263,6 +296,7 @@ async function init() {
     gooseFallback = counts.indexOf(Math.max(...counts));
   }
   setGoose(gooseMesh, gooseFaceMaterial);
+  if (!gooseFaceMaterial) $('goose-colours-section').classList.add('hidden');
   renderGooseColours();
   status('Starting geometry engine…');
   const { Manifold } = await manifold();
@@ -272,9 +306,52 @@ async function init() {
   } else {
     gooseManifold = await toManifold(gooseMesh);
   }
-  status(`Goose loaded: ${(gooseMesh.triangles.length / 3).toLocaleString()} triangles, ${Object.keys(profile.points).length} magnet points.`);
+  applyCharacterUi();
+  // the positions belong to the character: start again from its first one
+  neckBand = null; neckKey = '';
+  if (bandObject) bandObject.visible = false;
+  resetSlots();
+  if (!profile.points[activePoint] && !(activePoint === 'neck' && c.clothing)) activePoint = '';
+  positions.clear();
+  if (activePoint) restorePosition();
   renderPoints();
+  if (switching) {
+    // a point picked for a hole was on the last character
+    pick = null;
+    if (pickMarker) { scene.remove(pickMarker); pickMarker = null; }
+    $<HTMLButtonElement>('cut-hole').disabled = true;
+    if (tab === 'paint') setTab('accessory');
+    if (flatDesign) buildFlatNow(); else if (rawModel) applyPrepare(); else updatePreview();
+    if (tab === 'goose') void buildSlotsNow();
+    frameView();
+  }
+  characterReady = c.id;
+  status(`${c.name} loaded: ${(gooseMesh.triangles.length / 3).toLocaleString()} triangles, ${Object.keys(profile.points).length} magnet points.`);
 }
+
+/** Says the character's name wherever the panel names it, and shows what only applies to it. */
+function applyCharacterUi() {
+  const c = character;
+  const cap = c.word[0].toUpperCase() + c.word.slice(1);
+  for (const el of document.querySelectorAll<HTMLElement>('.cw')) el.textContent = el.classList.contains('cap') ? cap : c.word;
+  for (const el of document.querySelectorAll<HTMLElement>('[data-character]')) el.classList.toggle('hidden', el.dataset.character !== c.id);
+  $('subtitle').textContent = c.clothing ? `fit, dress and paint the desk ${c.word}` : `fit and paint accessories for the desk ${c.word}`;
+  const printTab = $('print-tab-button');
+  printTab.textContent = cap;
+  printTab.title = `The ${c.word} printed without pauses: magnets slide in after printing`;
+  const cloth = $<HTMLButtonElement>('clothing-tab-button');
+  cloth.disabled = !c.clothing;
+  cloth.title = c.clothing ? '' : `Clothing and the neck band are shaped for the goose's long neck; the ${c.word} takes accessories on its magnets`;
+  $('focus').textContent = focus ? `Show ${c.word}` : `Hide ${c.word}`;
+  $<HTMLSelectElement>('character').value = c.id;
+  $('slots-version-note').textContent = slotVersionNote();
+  $('slots-build-step').textContent = c.id === 'goose' ? '4' : '3';
+  if (tab === 'clothing' && !c.clothing) setTab('accessory');
+}
+$<HTMLSelectElement>('character').onchange = () => {
+  const id = $<HTMLSelectElement>('character').value;
+  if (id !== character.id) loadCharacter(id).catch((e) => status(`Failed to load the ${characterOf(id).word}: ${(e as Error).message}`));
+};
 
 function setGoose(mesh: IndexedMesh, faceMaterial: Uint8Array | null = null) {
   gooseMesh = mesh;
@@ -354,8 +431,7 @@ function renderPoints() {
     select.appendChild(opt);
     markers.add(marker(p, name === activePoint));
   }
-  list.appendChild(neckLi);
-  select.appendChild(neckOpt);
+  if (character.clothing) { list.appendChild(neckLi); select.appendChild(neckOpt); }
   if (!activePoint && Object.keys(profile.points).length) { activePoint = Object.keys(profile.points)[0]; restorePosition(); renderPoints(); return; }
   select.value = activePoint;
   $('neck-panel').classList.toggle('hidden', activePoint !== 'neck');
@@ -384,7 +460,7 @@ function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
 
 // ---------- accessory ----------
 // sensible widths for a model at each point, mm, shown as the placeholder
-const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24 };
+const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24, chest: 22 };
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 let loadSerial = 0;
@@ -719,8 +795,9 @@ async function buildFlatNow() {
     status(`Picture failed: ${(err as Error).message}`);
   }
 }
-/** The goose's forward direction in the plane: from the head point to the beak point. */
+/** The character's forward direction in the plane: the profile's own (the otter's), else from the head point to the beak point. */
 function forwardOnGoose(): V3 {
+  if (profile.forward) return profile.forward;
   const h = profile.points.head, b = profile.points.beak;
   if (!h || !b) return [0, -1, 0];
   const dx = b.center[0] - h.center[0], dy = b.center[1] - h.center[1], l = Math.hypot(dx, dy) || 1;
@@ -1333,7 +1410,7 @@ function applyFocus() {
 /** Everything shown that the view should take in: the part alone when the goose is hidden. */
 function subjectBox(): THREE.Box3 {
   const box = new THREE.Box3();
-  if (tab === 'goose' && slotsBuilt) return box.setFromObject(slotsGroup);
+  if (tab === 'goose' && (slotsBuilt || otterBuilt)) return box.setFromObject(slotsGroup);
   const part = focusSubject();
   if (focusOn() && part) return box.setFromObject(part);
   for (const o of [gooseObject, part, bandObject && bandObject.visible ? bandObject : null]) if (o) box.expandByObject(o);
@@ -1361,7 +1438,7 @@ $('focus').onclick = () => {
   const b = $('focus');
   b.classList.toggle('on', focus);
   b.setAttribute('aria-pressed', String(focus));
-  b.textContent = focus ? 'Show goose' : 'Hide goose';
+  b.textContent = focus ? `Show ${character.word}` : `Hide ${character.word}`;
   applyFocus();
 };
 // views from the goose's own front, side and top (the goose is turned on its base, so these follow it, not the axes)
@@ -1730,9 +1807,11 @@ function setTab(name: string) {
   guides.visible = name === 'clothing';
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   applyFocus();
-  // the Goose tab shows the slide-in build in place of the fitting goose
+  // the print tab shows the slide-in build in place of the fitting character, without the accessory
   slotsGroup.visible = name === 'goose';
-  if (name === 'goose' && !slotsBuilt && !slotsBuilding) void buildSlotsNow();
+  accessoryPivot.visible = name !== 'goose';
+  if (fittedObject) fittedObject.visible = name !== 'goose';
+  if (name === 'goose' && !slotsBuilt && !otterBuilt && !slotsBuilding) void buildSlotsNow();
   if (name !== 'accessory') { showGizmo(false); setMoveMode(false); }
   drawOverlay();
   // in paint mode the left button paints and the right button orbits
@@ -2019,7 +2098,7 @@ $('cut-hole').onclick = async () => {
     restorePosition();
     renderPoints();
     $('hole-result').textContent = `${mode} hole "${name}" cut.` + (result.pauseZ !== undefined ? ` Pause the print at Z = ${result.pauseZ.toFixed(2)} mm to insert the magnet.` : '');
-    status(`Hole "${name}" added. Export the goose STL to print it.`);
+    status(`Hole "${name}" added. Export the ${character.word} STL to print it.`);
     if (pickMarker) { scene.remove(pickMarker); pickMarker = null; }
     pick = null;
     $<HTMLButtonElement>('cut-hole').disabled = true;
@@ -2028,8 +2107,8 @@ $('cut-hole').onclick = async () => {
   }
 };
 
-$('export-goose').onclick = () => download('goose.holed.stl', serializeStl(gooseMesh));
-$('export-profile').onclick = () => download('profile.json', new TextEncoder().encode(JSON.stringify(profile, null, 2)));
+$('export-goose').onclick = () => download(`${character.id}.holed.stl`, serializeStl(gooseMesh));
+$('export-profile').onclick = () => download(character.files.profile, new TextEncoder().encode(JSON.stringify(profile, null, 2)));
 
 /** A download in the browser; the Save dialog on the desktop. */
 function download(name: string, bytes: Uint8Array) {
@@ -2037,12 +2116,14 @@ function download(name: string, bytes: Uint8Array) {
 }
 
 
-// ---------- the Goose tab: the slide-in-magnet print ----------
-// Built from the project 3MFs served beside the goose (goose.3mf, goose-voids.3mf) with src/slots-build.ts, the same
-// code as `npm run build-slots`; shown in place of the fitting goose, exported as a print 3MF or a zip of STLs.
+// ---------- the print tab (Goose, or Otter): the slide-in-magnet print ----------
+// The goose's is built from the project 3MFs served beside it (goose.3mf, goose-voids.3mf) with src/slots-build.ts, the
+// same code as `npm run build-slots`; the otter's from the otter in the view with src/otter.ts, as `npm run build-otter`.
+// Shown in place of the fitting character, exported as a print 3MF or a zip of STLs.
 let slotsSource: { parts: Part[]; voids: Part[] } | null = null;
 let slotsBuilt: SlotsBuild | null = null;
-let slotsObjects: ReturnType<typeof layoutBuild> | null = null;
+let otterBuilt: OtterSlotsBuild | null = null;
+let slotsObjects: BuildObject[] | null = null;
 let slotsBuilding = false;
 const slotsGroup = new THREE.Group();
 slotsGroup.visible = false;
@@ -2054,11 +2135,19 @@ const slotsMaterials = {
   magnet: new THREE.MeshStandardMaterial({ color: 0x55555f, roughness: 0.4, metalness: 0.6 }),
   eyes: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.5 }),
 };
-const SLOT_VERSION_NOTES: Record<string, string> = {
-  side: 'A rectangular bore square to the channel; the keys are flat bars that lie on a side to print.',
-  upright: 'The same bore; the belly keys get a level inner end and print standing on it, upside down, so their outer face has the belly\'s own layer lines. The head key still lies on its side.',
-  swept: 'The magnet\'s own shape swept along the channel, so the channel is as small as it can be; the keys have six sloping sides and lie on the seat\'s face plane to print.',
+const SLOT_VERSION_NOTES: Record<Character['id'], Record<string, string>> = {
+  goose: {
+    side: 'A rectangular bore square to the channel; the keys are flat bars that lie on a side to print.',
+    upright: 'The same bore; the belly keys get a level inner end and print standing on it, upside down, so their outer face has the belly\'s own layer lines. The head key still lies on its side.',
+    swept: 'The magnet\'s own shape swept along the channel, so the channel is as small as it can be; the keys have six sloping sides and lie on the seat\'s face plane to print.',
+  },
+  otter: {
+    side: 'A rectangular bore square to each channel; the keys are flat bars that lie on a side to print.',
+    upright: 'The same bore; the keys print standing on the end that is part of the base, so it has the base\'s finish. They lean like their channels and the head key is about 114 mm tall: give it a brim.',
+    swept: 'The magnet\'s own shape swept along each channel: a round bore up to the head, a flattened one to the chest. The keys print standing on their base end; give the head key a brim.',
+  },
 };
+const slotVersionNote = () => SLOT_VERSION_NOTES[character.id][$<HTMLSelectElement>('slots-version').value] ?? '';
 function slotOptions(): SlotOptions {
   const version = $<HTMLSelectElement>('slots-version').value;
   const n = (id: string, fallback: number) => { const v = Number($<HTMLInputElement>(id).value); return Number.isFinite(v) ? v : fallback; };
@@ -2069,34 +2158,56 @@ function slotOptions(): SlotOptions {
     keyClear: n('slots-key-clear', DEFAULT_SLOTS.keyClear),
     keyGap: n('slots-gap', DEFAULT_SLOTS.keyGap),
     boreStart: DEFAULT_SLOTS.boreStart,
-    tongue: $<HTMLInputElement>('slots-tongue').checked
+    tongue: character.id === 'goose' && $<HTMLInputElement>('slots-tongue').checked
       ? { proud: n('slots-proud', 1.5), clear: n('slots-tongue-clear', 0.15), size: [n('slots-tongue-w', 6), n('slots-tongue-h', 2)], offset: DEFAULT_SLOTS.tongue!.offset }
       : null,
   };
 }
+/** Forgets the build (another character, or the one in the view changed). */
+function resetSlots() {
+  slotsBuilt = null; otterBuilt = null; slotsObjects = null;
+  for (const o of [...slotsGroup.children]) { slotsGroup.remove(o); (o as THREE.Mesh).geometry?.dispose(); }
+  $('slots-result').textContent = 'Not built yet.';
+  for (const id of ['export-slots-3mf', 'export-slots-stl']) $<HTMLButtonElement>(id).disabled = true;
+}
 async function buildSlotsNow() {
   if (slotsBuilding) return;
   slotsBuilding = true;
+  const c = character;
   $<HTMLButtonElement>('build-slots').disabled = true;
-  status('Building the slide-in goose…');
+  status(`Building the slide-in ${c.word}…`);
   await new Promise((r) => setTimeout(r, 20));
   try {
-    if (!slotsSource) {
-      const [a, b] = await Promise.all([
-        fetch(import.meta.env.BASE_URL + 'goose.3mf').then((r) => { if (!r.ok) throw new Error('goose.3mf is not served'); return r.arrayBuffer(); }),
-        fetch(import.meta.env.BASE_URL + 'goose-voids.3mf').then((r) => { if (!r.ok) throw new Error('goose-voids.3mf is not served'); return r.arrayBuffer(); }),
-      ]);
-      slotsSource = { parts: await parse3mf(a), voids: await parse3mf(b) };
-    }
     const options = slotOptions();
-    slotsBuilt = await buildSlots(slotsSource.parts, slotsSource.voids, options, () => {});
-    slotsObjects = layoutBuild(slotsBuilt);
+    let channels: Record<string, { length: number; bore: [number, number]; key: ManifoldT; tongue: ManifoldT | null }>, notes: string[];
+    if (c.id === 'otter') {
+      const b = await buildOtterSlots(gooseManifold, profile, options, () => {});
+      if (c !== character) return;
+      resetSlots();
+      otterBuilt = b;
+      slotsObjects = layoutOtter(b, otterPaint(b, gooseFirstID));
+      ({ channels, notes } = b);
+    } else {
+      if (!slotsSource) {
+        const [a, b] = await Promise.all([
+          fetch(import.meta.env.BASE_URL + 'goose.3mf').then((r) => { if (!r.ok) throw new Error('goose.3mf is not served'); return r.arrayBuffer(); }),
+          fetch(import.meta.env.BASE_URL + 'goose-voids.3mf').then((r) => { if (!r.ok) throw new Error('goose-voids.3mf is not served'); return r.arrayBuffer(); }),
+        ]);
+        slotsSource = { parts: await parse3mf(a), voids: await parse3mf(b) };
+      }
+      const b = await buildSlots(slotsSource.parts, slotsSource.voids, options, () => {});
+      if (c !== character) return;
+      resetSlots();
+      slotsBuilt = b;
+      slotsObjects = layoutBuild(b);
+      ({ channels, notes } = b);
+    }
     showSlots();
     const f = (v: number) => v.toFixed(1);
-    const lines = Object.entries(slotsBuilt.channels).map(([name, ch]) => `${name.replace('_', ' ')}: ${f(ch.length)} mm channel, bore ${f(ch.bore[0])} × ${f(ch.bore[1])} mm, key ${f(ch.key.volume() / 1000)} cm³${ch.tongue ? `, tongue ${f(options.tongue!.proud)} mm proud` : ''}`);
-    $('slots-result').textContent = [...lines, ...slotsBuilt.notes].join(' · ');
+    const lines = Object.entries(channels).map(([name, ch]) => `${name.replace('_', ' ')}: ${f(ch.length)} mm channel, bore ${f(ch.bore[0])} × ${f(ch.bore[1])} mm, key ${f(ch.key.volume() / 1000)} cm³${ch.tongue ? `, tongue ${f(options.tongue!.proud)} mm proud` : ''}`);
+    $('slots-result').textContent = [...lines, ...notes].join(' · ');
     for (const id of ['export-slots-3mf', 'export-slots-stl']) $<HTMLButtonElement>(id).disabled = false;
-    status(`Slide-in goose built: ${Object.keys(slotsBuilt.channels).length} channels, ${slotsObjects.length} objects to print${slotsBuilt.notes.length ? '; ' + slotsBuilt.notes.join(' ') : '.'}`);
+    status(`Slide-in ${c.word} built: ${Object.keys(channels).length} channels, ${slotsObjects!.length} objects to print${notes.length ? '; ' + notes.join(' ') : '.'}`);
     if (tab === 'goose') frameView();
   } catch (err) {
     status(`Build failed: ${(err as Error).message}`);
@@ -2105,26 +2216,40 @@ async function buildSlotsNow() {
     $<HTMLButtonElement>('build-slots').disabled = false;
   }
 }
-/** The built goose in the view: body, base and legs where they print, keys, beak and magnets in place. */
+/** The built character in the view: the body as it prints, keys (and the goose's beak) and magnets in place. */
 function showSlots() {
   for (const o of [...slotsGroup.children]) { slotsGroup.remove(o); (o as THREE.Mesh).geometry?.dispose(); }
-  if (!slotsBuilt) return;
   const add = (m: ManifoldT, material: THREE.Material) => slotsGroup.add(new THREE.Mesh(toGeometry(fromManifold(m)), material));
+  const showKeys = $<HTMLInputElement>('slots-show-keys').checked, showMagnets = $<HTMLInputElement>('slots-show-magnets').checked;
+  if (otterBuilt) {
+    const body = fromManifoldTagged(otterBuilt.body, gooseFirstID, gooseMaterials.length, gooseFallback);
+    slotsGroup.add(new THREE.Mesh(colouredGeometry(body.mesh, body.faceMaterial, gooseMaterials), gooseColouredMaterial));
+    for (const ch of Object.values(otterBuilt.channels)) {
+      if (showKeys) add(ch.key, slotsMaterials.key);
+      if (showMagnets) add(ch.magnet, slotsMaterials.magnet);
+    }
+    return;
+  }
+  if (!slotsBuilt) return;
   add(slotsBuilt.goose.body, gooseMaterial);
   add(slotsBuilt.goose.base, slotsMaterials.green);
   for (const l of slotsBuilt.goose.legs) add(l, slotsMaterials.orange);
   if ($<HTMLInputElement>('slots-show-beak').checked) add(slotsBuilt.beak, slotsMaterials.orange);
   for (const ch of Object.values(slotsBuilt.channels)) {
-    if ($<HTMLInputElement>('slots-show-keys').checked) add(ch.key, slotsMaterials.key);
-    if ($<HTMLInputElement>('slots-show-magnets').checked) add(ch.magnet, slotsMaterials.magnet);
+    if (showKeys) add(ch.key, slotsMaterials.key);
+    if (showMagnets) add(ch.magnet, slotsMaterials.magnet);
   }
 }
 $('build-slots').onclick = () => { void buildSlotsNow(); };
-$<HTMLSelectElement>('slots-version').onchange = () => { $('slots-version-note').textContent = SLOT_VERSION_NOTES[$<HTMLSelectElement>('slots-version').value]; };
+$<HTMLSelectElement>('slots-version').onchange = () => { $('slots-version-note').textContent = slotVersionNote(); };
 for (const id of ['slots-show-keys', 'slots-show-beak', 'slots-show-magnets']) $<HTMLInputElement>(id).onchange = showSlots;
 const slotFileName = (o: { name: string }, p: { name: string }) => `${o.name === p.name ? p.name : `${o.name}-${p.name}`}.stl`.replace(/\s+/g, '-');
-$('export-slots-3mf').onclick = () => { if (slotsBuilt && slotsObjects) download('goose-slots.3mf', write3mfBuild(slotsObjects, slotsBuilt.materials, 'Gus Gus Goose, slide-in magnets')); };
-$('export-slots-stl').onclick = () => { if (slotsObjects) download('goose-slots-parts.zip', zipStore(slotsObjects.flatMap((o) => o.parts.map((p) => [slotFileName(o, p), serializeStl(p.mesh)] as [string, Uint8Array])))); };
+$('export-slots-3mf').onclick = () => {
+  if (!slotsObjects) return;
+  if (otterBuilt) download('otter-slots.3mf', write3mfBuild(slotsObjects, gooseMaterials, 'Sea otter, slide-in magnets'));
+  else if (slotsBuilt) download('goose-slots.3mf', write3mfBuild(slotsObjects, slotsBuilt.materials, 'Gus Gus Goose, slide-in magnets'));
+};
+$('export-slots-stl').onclick = () => { if (slotsObjects) download(`${character.id}-slots-parts.zip`, zipStore(slotsObjects.flatMap((o) => o.parts.map((p) => [slotFileName(o, p), serializeStl(p.mesh)] as [string, Uint8Array])))); };
 
 // ---------- the library: save the build, open it again later ----------
 // A build keeps the file it was made from, every setting (as the panel's inputs hold them, plus each position's
@@ -2133,6 +2258,8 @@ $('export-slots-stl').onclick = () => { if (slotsObjects) download('goose-slots-
 // back on: straight onto the same faces when the fit comes out the same, else by where it lay.
 interface SavedState {
   version: 1;
+  /** the character it was made for (absent: the goose) */
+  character?: Character['id'];
   inputs: Record<string, string | boolean>;
   activePoint: string;
   positions: [string, PositionState][];
@@ -2178,6 +2305,7 @@ function savedState(): SavedState {
   savePosition();
   return {
     version: 1,
+    character: character.id,
     inputs: readInputs(),
     activePoint,
     positions: [...positions],
@@ -2294,6 +2422,7 @@ async function saveToLibrary() {
       id: reuse?.id ?? newId(),
       name: answer.name, description: answer.description, tags: answer.tags, collection: answer.collection,
       kind,
+      character: character.id,
       point: kind === 'garment' ? '' : activePoint,
       sourceName: garmentSource ? sourceFile?.name ?? '' : '',
       created: reuse?.created ?? now,
@@ -2331,6 +2460,8 @@ async function openBuild(meta: BuildMeta) {
     if (srcName && !src) throw new Error('its model file is missing');
     const part = st.fitted && meta.files.includes('part.bin') ? await store.read(meta.id, 'part.bin') : null;
     clearModel();
+    // the character it was made for comes back first, so the positions and the fit are its own
+    if (characterOf(st.character).id !== character.id) await loadCharacter(characterOf(st.character).id);
     setTab(st.garment ? 'clothing' : 'accessory');
     const before = () => applySaved(st);
     if (src) {
@@ -2420,7 +2551,8 @@ if (isDesktop()) document.documentElement.classList.add('desktop');
     return { min, max };
   },
   get moveMode() { return moveMode; },
-  get slots() { return slotsBuilt ? { channels: Object.keys(slotsBuilt.channels), objects: slotsObjects?.map((o) => o.name) ?? [], shown: slotsGroup.visible && slotsGroup.children.length } : null; },
+  get slots() { const b = slotsBuilt ?? otterBuilt; return b ? { channels: Object.keys(b.channels), objects: slotsObjects?.map((o) => o.name) ?? [], shown: slotsGroup.visible && slotsGroup.children.length, notes: b.notes } : null; },
+  get character() { return characterReady; },
   lookAt(target: V3, position: V3) { controls.target.set(...target); camera.position.set(...position); controls.update(); },
   get camera() { return { position: camera.position.toArray(), target: controls.target.toArray() }; },
   modelOnScreen(dx: number, dy: number, dz: number) {

@@ -517,6 +517,34 @@ await page.waitForFunction(() => document.getElementById('status').textContent.s
 await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Slide-in goose built'), null, { timeout: 120000 });
 console.log('6b.', await page.locator('#slots-result').textContent());
 
+// the otter: a second character with its own points and colours; its print tab builds the slide-in otter
+await page.selectOption('#character', 'otter');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Slide-in otter built'), null, { timeout: 120000 });
+const otter = await page.evaluate(() => ({
+  character: window.__goose.character, points: Object.keys(window.__goose.profile.points).sort(), slots: window.__goose.slots,
+  tab: document.getElementById('print-tab-button').textContent, clothing: document.getElementById('clothing-tab-button').disabled,
+  positions: [...document.querySelectorAll('#point option')].map((o) => o.value), fit: document.getElementById('fit').textContent,
+}));
+console.log('7.', await status(), JSON.stringify(otter));
+if (otter.character !== 'otter' || otter.points.join() !== 'chest,head' || otter.slots?.channels.join() !== 'head,chest' || otter.slots.objects.join() !== 'otter,key head,key chest' || otter.slots.notes.length) throw new Error('the slide-in otter did not build');
+if (otter.tab !== 'Otter' || !otter.clothing || otter.positions.includes('neck') || otter.fit !== 'Fit to the otter') throw new Error('the panel still speaks of the goose');
+await page.screenshot({ path: join(out, '7-otter-slots.png') });
+// a puck on the otter's chest, between the paws
+await page.click('.tabs button[data-tab="accessory"]');
+await page.setInputFiles('#accessory-file', { name: 'puck.stl', mimeType: 'application/octet-stream', buffer: Buffer.from(puckStl(9, 8, 64)) });
+await page.waitForFunction(() => document.getElementById('status').textContent.includes('Place it'), null, { timeout: 30000 });
+await page.selectOption('#point', 'chest');
+await page.click('#fit');
+await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
+console.log('7b.', await page.locator('#fit-result').textContent());
+await page.click('#view-front');
+await page.screenshot({ path: join(out, '7b-otter-chest.png') });
+await page.selectOption('#character', 'goose');
+await page.waitForFunction(() => window.__goose.character === 'goose', null, { timeout: 60000 });
+const back = await page.evaluate(() => ({ points: Object.keys(window.__goose.profile.points).length, clothing: document.getElementById('clothing-tab-button').disabled, tab: document.getElementById('print-tab-button').textContent }));
+console.log('7c.', await status(), JSON.stringify(back));
+if (back.points < 4 || back.clothing || back.tab !== 'Goose') throw new Error('the goose did not come back');
+
 await browser.close();
 await server.close();
 if (errors.length) { console.log('console errors:\n' + errors.join('\n')); process.exit(1); }

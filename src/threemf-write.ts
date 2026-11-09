@@ -197,9 +197,10 @@ export function write3mfBuild(objects: BuildObject[], materials: Material[], nam
       out.push('    </vertices>\n    <triangles>\n');
       for (let k = 0; k < T.length; k += 3) {
         const m = part.faceMaterial?.[k / 3];
+        const paint = paintAttrs(part.paintCodes?.[k / 3]);
         out.push(m === undefined || m === part.material
-          ? `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" />\n`
-          : `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" pid="1" p1="${m}" />\n`);
+          ? `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}"${paint} />\n`
+          : `     <triangle v1="${T[k]}" v2="${T[k + 1]}" v3="${T[k + 2]}" pid="1" p1="${m}"${paint} />\n`);
       }
       out.push('    </triangles>\n   </mesh>\n  </object>\n');
     }

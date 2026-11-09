@@ -20,6 +20,8 @@ export interface FitProfile {
   points: Record<string, MagnetVoid & { polarityOut?: 'N' | 'S' }>;
   /** other openings in the goose (magnet insertion slots) the fit treats as solid */
   slots?: MagnetVoid[];
+  /** the character's forward direction, when the points cannot tell it (the goose's is from its head to its beak) */
+  forward?: [number, number, number];
 }
 
 export const DEFAULT_PROFILE: Omit<FitProfile, 'points'> = {

@@ -47,8 +47,9 @@ export interface NeckBand {
   warnings: string[];
 }
 
-/** The goose's forward direction in the plane, from the head to the beak when the profile has both, else -y. */
+/** The character's forward direction in the plane: the profile's own, else from the head to the beak when it has both, else -y. */
 export function forwardOf(profile: FitProfile): V3 {
+  if (profile.forward) return profile.forward;
   const h = profile.points.head, b = profile.points.beak;
   if (h && b) {
     const dx = b.center[0] - h.center[0], dy = b.center[1] - h.center[1];
