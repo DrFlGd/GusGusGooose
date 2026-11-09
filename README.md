@@ -53,7 +53,7 @@ the settings on the left, the view in the middle with buttons for iso,
 front, side and top views, Fit and Hide goose, and Export on the right
 (3MF with colours, STL, split by colour). Each side scrolls on its own and
 the view never scrolls; a button in the top bar switches between light and
-dark. It shows the goose in its filament colours with its magnet points. Load a downloaded model (STL, OBJ
+dark. It shows the goose in its filament colours with its magnet points. The Goose tab builds the slide-in-magnet print (channels from each magnet seat to a covered mouth, flat or swept, with the tolerances as controls) and exports it as a 3MF or STLs. Load a downloaded model (STL, OBJ
 or 3MF, or drop the file on the view), prepare it (which side meets the
 goose, a width to scale it to, a plug of solid material for hollow models),
 place it on a point with sink, spin and slide controls, Fit with one click
@@ -231,7 +231,8 @@ npm install
 # 0. rebuild goose/goose.stl and goose/profile.json from the project 3MFs (only when the goose changes)
 node src/build-goose.ts goose/goose.3mf goose/goose.stl --voids goose/goose-voids.3mf
 
-# 0b. the slide-in-magnet print: body with channels, keys, loose beak and eyes (docs/PLAN.md, "Slide-in magnets")
+# 0b. the slide-in-magnet print: body with channels, keys, loose beak and eyes (docs/PLAN.md, "Slide-in magnets");
+#     --style swept|flat, --key side|upright, --clear/--key-clear/--gap/--proud for the tolerances (the app's Goose tab has the same)
 node src/build-slots.ts --out goose/goose-slots.3mf
 
 # 1. find cylindrical magnet voids in a model, write goose/profile.json
@@ -277,7 +278,7 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 
 - `src/threemf.ts` reads a 3MF project (parts, transforms, negative parts)
 - `src/build-goose.ts` unions the 3MF parts into the one goose solid, cutting the mapped voids
-- `src/slots.ts`, `src/build-slots.ts` slide-in magnet channels from each seat to a covered mouth, their keys, and the print 3MF; `src/render.ts` draws solids to PNG
+- `src/slots.ts`, `src/slots-build.ts`, `src/build-slots.ts` slide-in magnet channels from each seat to a covered mouth (swept or flat bore), their keys, the beak's registration pocket, and the print 3MF (the app's Goose tab uses the same); `src/render.ts` draws solids to PNG
 - `src/map-voids.ts` carries negative parts from one 3MF onto another and turns them into magnet points
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose

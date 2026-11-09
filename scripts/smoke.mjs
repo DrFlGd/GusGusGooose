@@ -504,6 +504,19 @@ await page.waitForFunction(() => document.getElementById('hole-result').textCont
 console.log('5.', await page.locator('#hole-result').textContent());
 await page.screenshot({ path: join(out, '4-hole.png') });
 
+// the Goose tab: the slide-in-magnet print builds from the project 3MFs on first visit, exports are enabled
+await page.click('.tabs button[data-tab="goose"]');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Slide-in goose built'), null, { timeout: 120000 });
+const slots = await page.evaluate(() => window.__goose.slots);
+console.log('6.', await status(), JSON.stringify(slots));
+if (!slots || slots.channels.length !== 3 || !slots.shown || await page.locator('#export-slots-3mf').isDisabled()) throw new Error('the slide-in goose did not build or show');
+await page.screenshot({ path: join(out, '6-slots.png') });
+await page.selectOption('#slots-version', 'upright');
+await page.click('#build-slots');
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Building'), null, { timeout: 5000 }).catch(() => {});
+await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Slide-in goose built'), null, { timeout: 120000 });
+console.log('6b.', await page.locator('#slots-result').textContent());
+
 await browser.close();
 await server.close();
 if (errors.length) { console.log('console errors:\n' + errors.join('\n')); process.exit(1); }

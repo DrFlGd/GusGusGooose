@@ -24,7 +24,10 @@ import { contourGarment, wrapGarment, cavityProfile, wrapFrame, trimGarment, typ
 import { expandRuns, type GooseColors } from '../goose-colors.ts';
 import { addMagnetHole } from '../hole.ts';
 import type { MagnetVoid } from '../voids.ts';
-import { write3mf, write3mfParts, type Material } from '../threemf-write.ts';
+import { write3mf, write3mfBuild, write3mfParts, zipStore, type Material } from '../threemf-write.ts';
+import { parse3mf, type Part } from '../threemf-parse.ts';
+import { buildSlots, layoutBuild, type SlotsBuild } from '../slots-build.ts';
+import { DEFAULT_SLOTS, type SlotOptions } from '../slots.ts';
 import { splitByMaterial } from '../split-colours.ts';
 import { PaintState } from './paint.ts';
 import { faceIdMap } from './pick.ts';
@@ -1313,8 +1316,8 @@ function focusSubject(): THREE.Object3D | null {
 /** Hides or shows everything that is not the part; the camera frames the part when the goose goes, and comes back after. */
 function applyFocus() {
   const on = focusOn() && !!focusSubject();
-  if (gooseObject) gooseObject.visible = !on;
-  markers.visible = !on;
+  if (gooseObject) gooseObject.visible = !on && tab !== 'goose';
+  markers.visible = !on && tab !== 'goose';
   if (pickMarker) pickMarker.visible = !on;
   grid.visible = !on;
   if (bandObject) bandObject.visible = !on && activePoint === 'neck';
@@ -1330,6 +1333,7 @@ function applyFocus() {
 /** Everything shown that the view should take in: the part alone when the goose is hidden. */
 function subjectBox(): THREE.Box3 {
   const box = new THREE.Box3();
+  if (tab === 'goose' && slotsBuilt) return box.setFromObject(slotsGroup);
   const part = focusSubject();
   if (focusOn() && part) return box.setFromObject(part);
   for (const o of [gooseObject, part, bandObject && bandObject.visible ? bandObject : null]) if (o) box.expandByObject(o);
@@ -1716,7 +1720,7 @@ function setTab(name: string) {
   const lib = name === 'library';
   if (!lib) editorTab = name;
   for (const x of document.querySelectorAll<HTMLButtonElement>('.tabs button')) x.classList.toggle('active', x.dataset.tab === name);
-  for (const t of ['accessory', 'clothing', 'hole', 'paint', 'library']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['accessory', 'clothing', 'hole', 'goose', 'paint', 'library']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
   // the Library takes the view and the export column for its cards and the chosen build
   $('view').classList.toggle('hidden', lib);
   $('library').classList.toggle('hidden', !lib);
@@ -1726,6 +1730,9 @@ function setTab(name: string) {
   guides.visible = name === 'clothing';
   if (name === 'clothing') { updateGuides(); wrapPreview(); } else { hideGhost(); if (name === 'accessory') updatePreview(); }
   applyFocus();
+  // the Goose tab shows the slide-in build in place of the fitting goose
+  slotsGroup.visible = name === 'goose';
+  if (name === 'goose' && !slotsBuilt && !slotsBuilding) void buildSlotsNow();
   if (name !== 'accessory') { showGizmo(false); setMoveMode(false); }
   drawOverlay();
   // in paint mode the left button paints and the right button orbits
@@ -2029,6 +2036,96 @@ function download(name: string, bytes: Uint8Array) {
   saveExport(name, bytes).catch((err) => status(`Could not save ${name}: ${(err as Error).message}`));
 }
 
+
+// ---------- the Goose tab: the slide-in-magnet print ----------
+// Built from the project 3MFs served beside the goose (goose.3mf, goose-voids.3mf) with src/slots-build.ts, the same
+// code as `npm run build-slots`; shown in place of the fitting goose, exported as a print 3MF or a zip of STLs.
+let slotsSource: { parts: Part[]; voids: Part[] } | null = null;
+let slotsBuilt: SlotsBuild | null = null;
+let slotsObjects: ReturnType<typeof layoutBuild> | null = null;
+let slotsBuilding = false;
+const slotsGroup = new THREE.Group();
+slotsGroup.visible = false;
+scene.add(slotsGroup);
+const slotsMaterials = {
+  orange: new THREE.MeshStandardMaterial({ color: 0xff8000, roughness: 0.7 }),
+  green: new THREE.MeshStandardMaterial({ color: 0x3cc83c, roughness: 0.7 }),
+  key: new THREE.MeshStandardMaterial({ color: 0x6fb1ff, roughness: 0.5 }),
+  magnet: new THREE.MeshStandardMaterial({ color: 0x55555f, roughness: 0.4, metalness: 0.6 }),
+  eyes: new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.5 }),
+};
+const SLOT_VERSION_NOTES: Record<string, string> = {
+  side: 'A rectangular bore square to the channel; the keys are flat bars that lie on a side to print.',
+  upright: 'The same bore; the belly keys get a level inner end and print standing on it, upside down, so their outer face has the belly\'s own layer lines. The head key still lies on its side.',
+  swept: 'The magnet\'s own shape swept along the channel, so the channel is as small as it can be; the keys have six sloping sides and lie on the seat\'s face plane to print.',
+};
+function slotOptions(): SlotOptions {
+  const version = $<HTMLSelectElement>('slots-version').value;
+  const n = (id: string, fallback: number) => { const v = Number($<HTMLInputElement>(id).value); return Number.isFinite(v) ? v : fallback; };
+  return {
+    style: version === 'swept' ? 'swept' : 'flat',
+    keyEnd: version === 'upright' ? 'level' : 'square',
+    channelClear: n('slots-clear', DEFAULT_SLOTS.channelClear),
+    keyClear: n('slots-key-clear', DEFAULT_SLOTS.keyClear),
+    keyGap: n('slots-gap', DEFAULT_SLOTS.keyGap),
+    boreStart: DEFAULT_SLOTS.boreStart,
+    tongue: $<HTMLInputElement>('slots-tongue').checked
+      ? { proud: n('slots-proud', 1.5), clear: n('slots-tongue-clear', 0.15), size: [n('slots-tongue-w', 6), n('slots-tongue-h', 2)], offset: DEFAULT_SLOTS.tongue!.offset }
+      : null,
+  };
+}
+async function buildSlotsNow() {
+  if (slotsBuilding) return;
+  slotsBuilding = true;
+  $<HTMLButtonElement>('build-slots').disabled = true;
+  status('Building the slide-in goose…');
+  await new Promise((r) => setTimeout(r, 20));
+  try {
+    if (!slotsSource) {
+      const [a, b] = await Promise.all([
+        fetch(import.meta.env.BASE_URL + 'goose.3mf').then((r) => { if (!r.ok) throw new Error('goose.3mf is not served'); return r.arrayBuffer(); }),
+        fetch(import.meta.env.BASE_URL + 'goose-voids.3mf').then((r) => { if (!r.ok) throw new Error('goose-voids.3mf is not served'); return r.arrayBuffer(); }),
+      ]);
+      slotsSource = { parts: await parse3mf(a), voids: await parse3mf(b) };
+    }
+    const options = slotOptions();
+    slotsBuilt = await buildSlots(slotsSource.parts, slotsSource.voids, options, () => {});
+    slotsObjects = layoutBuild(slotsBuilt);
+    showSlots();
+    const f = (v: number) => v.toFixed(1);
+    const lines = Object.entries(slotsBuilt.channels).map(([name, ch]) => `${name.replace('_', ' ')}: ${f(ch.length)} mm channel, bore ${f(ch.bore[0])} × ${f(ch.bore[1])} mm, key ${f(ch.key.volume() / 1000)} cm³${ch.tongue ? `, tongue ${f(options.tongue!.proud)} mm proud` : ''}`);
+    $('slots-result').textContent = [...lines, ...slotsBuilt.notes].join(' · ');
+    for (const id of ['export-slots-3mf', 'export-slots-stl']) $<HTMLButtonElement>(id).disabled = false;
+    status(`Slide-in goose built: ${Object.keys(slotsBuilt.channels).length} channels, ${slotsObjects.length} objects to print${slotsBuilt.notes.length ? '; ' + slotsBuilt.notes.join(' ') : '.'}`);
+    if (tab === 'goose') frameView();
+  } catch (err) {
+    status(`Build failed: ${(err as Error).message}`);
+  } finally {
+    slotsBuilding = false;
+    $<HTMLButtonElement>('build-slots').disabled = false;
+  }
+}
+/** The built goose in the view: body, base and legs where they print, keys, beak and magnets in place. */
+function showSlots() {
+  for (const o of [...slotsGroup.children]) { slotsGroup.remove(o); (o as THREE.Mesh).geometry?.dispose(); }
+  if (!slotsBuilt) return;
+  const add = (m: ManifoldT, material: THREE.Material) => slotsGroup.add(new THREE.Mesh(toGeometry(fromManifold(m)), material));
+  add(slotsBuilt.goose.body, gooseMaterial);
+  add(slotsBuilt.goose.base, slotsMaterials.green);
+  for (const l of slotsBuilt.goose.legs) add(l, slotsMaterials.orange);
+  if ($<HTMLInputElement>('slots-show-beak').checked) add(slotsBuilt.beak, slotsMaterials.orange);
+  for (const ch of Object.values(slotsBuilt.channels)) {
+    if ($<HTMLInputElement>('slots-show-keys').checked) add(ch.key, slotsMaterials.key);
+    if ($<HTMLInputElement>('slots-show-magnets').checked) add(ch.magnet, slotsMaterials.magnet);
+  }
+}
+$('build-slots').onclick = () => { void buildSlotsNow(); };
+$<HTMLSelectElement>('slots-version').onchange = () => { $('slots-version-note').textContent = SLOT_VERSION_NOTES[$<HTMLSelectElement>('slots-version').value]; };
+for (const id of ['slots-show-keys', 'slots-show-beak', 'slots-show-magnets']) $<HTMLInputElement>(id).onchange = showSlots;
+const slotFileName = (o: { name: string }, p: { name: string }) => `${o.name === p.name ? p.name : `${o.name}-${p.name}`}.stl`.replace(/\s+/g, '-');
+$('export-slots-3mf').onclick = () => { if (slotsBuilt && slotsObjects) download('goose-slots.3mf', write3mfBuild(slotsObjects, slotsBuilt.materials, 'Gus Gus Goose, slide-in magnets')); };
+$('export-slots-stl').onclick = () => { if (slotsObjects) download('goose-slots-parts.zip', zipStore(slotsObjects.flatMap((o) => o.parts.map((p) => [slotFileName(o, p), serializeStl(p.mesh)] as [string, Uint8Array])))); };
+
 // ---------- the library: save the build, open it again later ----------
 // A build keeps the file it was made from, every setting (as the panel's inputs hold them, plus each position's
 // placement, the moved puck or mount, the picture's trace settings and the palette), the fitted part with its paint,
@@ -2323,6 +2420,7 @@ if (isDesktop()) document.documentElement.classList.add('desktop');
     return { min, max };
   },
   get moveMode() { return moveMode; },
+  get slots() { return slotsBuilt ? { channels: Object.keys(slotsBuilt.channels), objects: slotsObjects?.map((o) => o.name) ?? [], shown: slotsGroup.visible && slotsGroup.children.length } : null; },
   lookAt(target: V3, position: V3) { controls.target.set(...target); camera.position.set(...position); controls.update(); },
   get camera() { return { position: camera.position.toArray(), target: controls.target.toArray() }; },
   modelOnScreen(dx: number, dy: number, dz: number) {

@@ -399,9 +399,13 @@ gets a channel from each magnet seat to a mouth on the surface that another
 part covers. The seats themselves are untouched, so every fitted accessory
 still aligns: `goose/goose.stl` and `goose/profile.json` do not change, and
 `test/slots.test.ts` checks the seats' outer faces stay where the profile
-has them. `node src/build-slots.ts` writes `goose/goose-slots.3mf`: the body,
-base and legs as one object (pins and channels already cut), and the loose
-parts laid flat beside it.
+has them, in every version. `npm run build-slots` (src/build-slots.ts, the
+geometry in src/slots.ts and src/slots-build.ts) writes
+`goose/goose-slots.3mf`: the body, base and legs as one object (pins and
+channels already cut), and the loose parts laid flat beside it. The app's
+Goose tab builds the same thing in the browser from goose.3mf and
+goose-voids.3mf, with the version and the tolerances as controls, and
+exports the 3MF or a zip of STLs.
 
 Which seat can be reached from where (scanned over the body with the mouth
 required to open once, with nothing of the channel within 0.8 mm of the skin
@@ -411,29 +415,61 @@ elsewhere):
   0.5 mm under the skin on the goose's right, so a channel leaving at the
   seat's height breaks the forehead; the channel first drops 3 mm straight
   down (a snug 10.5 mm bore, the magnet's final travel), then runs 16 mm
-  forward and down to the face. The mouth is 12.6 x 6.6 mm, within the beak's
-  footprint except for slivers at the sides. The eye pins' seats are clear.
-  A white key fills the channel behind the magnet and the beak glues over it.
+  forward and down to the face. The mouth is about 10.7 x 6.7 mm, within the
+  beak's footprint except for slivers at the sides. The eye pins' seats are
+  clear. A white key fills the channel behind the magnet; the beak glues
+  over it.
 - **Wings**: not from the legs. A leg is 4 mm across where it meets the body,
-  the mouth is 14 x 7 mm, and the body narrows so fast below a wing that a
+  the mouth is 14 x 7.7 mm, and the body narrows so fast below a wing that a
   channel straight down in the seat's plane breaks out of the side 10 mm
   down. The channel instead runs from the seat down and inward, 49 mm, to the
-  belly just behind and inboard of that leg, where the stance hides it and
-  the leg pins are missed. The bore is 7.3 mm through the seat's thickness
-  because the magnet travels obliquely to its own faces; it only becomes
-  snug at the seat. A white key fills each channel and sits flush.
+  belly just behind and inboard of that leg (left (123, 155), right (95,
+  144)), where the stance hides it and the leg pins are missed. The bore is
+  7.7 mm through the seat's thickness because the magnet travels obliquely
+  to its own faces; it only becomes snug at the seat. A white key fills each
+  channel and sits flush.
 - **Beak**: nothing to do. Its magnet already slides in from the back face
   along a slot (`slots` in the profile); the beak is printed on its own in
   orange, loaded, and glued to the face over the head key.
 - Legs and base stay printed in place with the body, so the print still
   stands on its base. The beak and eyes come off the body and print loose.
 
+Three versions (Jerred asked for flat-sided keys that print easily, in a
+side-lying and an upright form, 2026-11-09 afternoon), `SlotOptions.style`
+and `keyEnd`:
+
+- **Swept**: the seat's own shape swept along the path, so the channel is
+  only as big as the magnet needs; the key has six sloping sides and lies on
+  the seat's face plane to print.
+- **Flat, on its side** (default): a rectangular bore square to the channel,
+  just big enough for the seat's silhouette, clipped so it never passes the
+  seat's outer face; the magnet leaves the seat along a swept transition,
+  the bore takes over from the seat's centre plane. The key is a flat bar
+  cut square at the magnet end, printed lying on its wide side. A bore
+  reaching back over the seat opened the wing's top, which is why the
+  transition exists.
+- **Flat, upright**: the same bore, the belly keys' inner end cut level with
+  the goose's layers, so each prints standing on that end upside down (38
+  mm tall, leaning about 30 degrees) and its outer face has the belly's own
+  layer lines. The head channel runs nearly level, so its key keeps the
+  square end and lies on its side.
+
+**Beak registration** (Jerred, same message): the head key carries a 6 x 2
+mm tongue, 1.5 mm proud of the face, 2.1 mm above the channel's centre line,
+and the beak gets a matching pocket (0.15 mm clearance) in its back face, so
+the beak locates on the key rather than being glued on by eye. The tongue is
+smaller than the key's face because the beak's back is barely wider than the
+mouth (a full-face recess would open the beak's sides) and because the
+beak's own magnet slot opens on that back face just below the mouth: at a
+1.2 mm offset the pocket cut into that slot by 6.7 mm3, at 2.1 mm it is
+clear (`buildSlots` reports it as a note if the tongue is moved into it).
+
 Assembly: slide each magnet up its channel (an accessory or a spare magnet
 held on the outside pulls it into the seat; a dab of glue on its outer face
-first), push the key in behind it, glue the beak on with its own magnet in,
-pins through the base and legs as before. Geometry in `src/slots.ts`
-(`buildChannel`: the seat swept along a polyline with 0.15 mm clearance per
-side, the key 0.2 mm smaller and stopping 1 mm short of the seat).
+first), push the key in behind it, glue the beak on over the tongue with its
+own magnet in, pins through the base and legs as before. Tolerances to tune
+from a print: channel over the magnet (0.15 mm a side), key under the
+channel (0.2), key short of the magnet's travel (1), pocket clearance (0.15).
 
 ## Still needed from Jerred
 

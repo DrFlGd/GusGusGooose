@@ -15,6 +15,7 @@
         <button data-tab="clothing">Clothing</button>
         <button data-tab="paint" id="paint-tab-button" disabled title="Load an accessory or make a garment first">Paint</button>
         <button data-tab="hole">Hole</button>
+        <button data-tab="goose" title="The goose printed without pauses: magnets slide in after printing">Goose</button>
         <button data-tab="library" id="library-tab-button" title="Saved builds by holiday and category">Library</button>
       </nav>
       <div class="top-actions">
@@ -511,6 +512,47 @@
           <div class="row">
             <button id="export-goose">Goose STL</button>
             <button id="export-profile">Profile JSON</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ Goose: slide-in magnets ============ -->
+      <section id="tab-goose" class="tab hidden">
+        <div class="step">
+          <h2><span class="n">1</span>Slide-in magnets</h2>
+          <p class="small muted">The goose printed without pauses. Each body magnet slides up a channel into its seat after printing, and a white key closes the channel behind it: the head's channel opens on the face under the beak, the wings' on the belly behind the legs. The beak's own magnet slides in from its back as before. The seats stay where the fit profile has them, so every accessory still aligns.</p>
+          <div class="field"><span>Version</span>
+            <select id="slots-version">
+              <option value="side" selected>Flat bore, keys print on their side</option>
+              <option value="upright">Flat bore, belly keys print upright</option>
+              <option value="swept">Swept channel, six-sided keys</option>
+            </select>
+          </div>
+          <p id="slots-version-note" class="small muted">A rectangular bore square to the channel; the keys are flat bars that lie on a side to print.</p>
+        </div>
+        <div class="step">
+          <h2><span class="n">2</span>Tolerances</h2>
+          <div class="field"><span>Channel over the magnet</span><span class="val"><input type="number" id="slots-clear" min="0" step="0.05" value="0.15" /><span class="unit">mm/side</span></span></div>
+          <div class="field"><span>Key under the channel</span><span class="val"><input type="number" id="slots-key-clear" min="0" step="0.05" value="0.2" /><span class="unit">mm/side</span></span></div>
+          <div class="field"><span>Key short of the magnet</span><span class="val"><input type="number" id="slots-gap" min="0" step="0.5" value="1" /><span class="unit">mm</span></span></div>
+        </div>
+        <div class="step">
+          <h2><span class="n">3</span>Beak key</h2>
+          <label class="check small"><input type="checkbox" id="slots-tongue" checked /> The head key stands proud of the face with a tongue that registers in a pocket in the beak, so the beak glues on square.</label>
+          <div class="field"><span>Tongue stands proud</span><span class="val"><input type="number" id="slots-proud" min="0" step="0.5" value="1.5" /><span class="unit">mm</span></span></div>
+          <div class="field"><span>Pocket clearance</span><span class="val"><input type="number" id="slots-tongue-clear" min="0" step="0.05" value="0.15" /><span class="unit">mm/side</span></span></div>
+          <div class="field"><span>Tongue</span><span class="val"><input type="number" id="slots-tongue-w" min="1" step="0.5" value="6" /><span class="unit">wide</span><input type="number" id="slots-tongue-h" min="1" step="0.5" value="2" /><span class="unit">tall</span></span></div>
+        </div>
+        <div class="step">
+          <h2><span class="n">4</span>Build and export</h2>
+          <div class="actions"><button id="build-slots" class="primary">Build</button></div>
+          <p id="slots-result" class="small">Not built yet.</p>
+          <label class="check small"><input type="checkbox" id="slots-show-keys" checked /> Show the keys in place</label>
+          <label class="check small"><input type="checkbox" id="slots-show-beak" checked /> Show the beak</label>
+          <label class="check small"><input type="checkbox" id="slots-show-magnets" checked /> Show the magnets</label>
+          <div class="export">
+            <button id="export-slots-3mf" class="export-btn" disabled><span>Print 3MF</span><small>Goose with base and legs in place; beak, keys and eyes laid flat beside it, colours as filaments</small></button>
+            <button id="export-slots-stl" class="export-btn" disabled><span>Parts as STL (zip)</span><small>One file per part, same layout</small></button>
           </div>
         </div>
       </section>
