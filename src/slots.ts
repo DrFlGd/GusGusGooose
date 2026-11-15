@@ -74,6 +74,13 @@ export interface ChannelSpec {
    */
   drop: number;
   dropAxis?: V3;
+  /**
+   * In place of a drop: points the seat's centre passes through, in order,
+   * before the straight leg to the mouth (a bent first part, as from the
+   * bear's wrists back out of each forearm and in behind it). The key fills
+   * the straight leg only.
+   */
+  via?: V3[];
   /** whether this channel's key carries the registration tongue (the head's, into the beak) */
   tongue?: boolean;
   /** false for a channel whose key must not take the level end (the head's runs nearly level, so it would lose the key) */
@@ -87,7 +94,7 @@ export interface Channel {
   direction: V3;
   /** the channel's frame: across the bore, through the bore (toward the seat's outer face), and along it */
   frame: { across: V3; through: V3; along: V3 };
-  /** the junction between the drop and the oblique leg (the seat centre when there is no drop) */
+  /** the junction between the drop (or the last `via` point) and the oblique leg (the seat centre when there is neither) */
   junction: V3;
   /** the void to cut from the body: the seat and the whole channel, with clearance */
   cut: ManifoldT;
@@ -191,7 +198,9 @@ export function buildChannel(M: ManifoldToplevel['Manifold'], spec: ChannelSpec,
   const outAxis = scale(seat.axes[outer.axis], outer.sign);
   const c = seat.center;
   const dropAxis = spec.dropAxis ?? ([0, 0, -1] as V3);
-  const junction = spec.drop > 0 ? add(c, unit(dropAxis), spec.drop) : c;
+  // the bent first part: the drop, or the via points; the junction is where it ends
+  const via: V3[] = spec.via?.length ? spec.via : spec.drop > 0 ? [add(c, unit(dropAxis), spec.drop)] : [];
+  const junction = via.length ? via[via.length - 1] : c;
   const along = unit(sub(spec.mouth, junction));
   const end = add(spec.mouth, along, extra);
   // the frame: across = the seat's widest side axis made square to the channel; through = toward the outer face
@@ -214,7 +223,7 @@ export function buildChannel(M: ManifoldToplevel['Manifold'], spec: ChannelSpec,
     const centre = add(add(add(junction, across, (a0 + a1) / 2), through, (t0 + t1) / 2), along, (from + to) / 2);
     return M.cube([w, h, to - from], true).transform(columnMajor([across, through, along], centre) as any);
   };
-  const path = spec.drop > 0 ? [junction, end] : [end];
+  const path = [...via, end];
   const seatGrown = seatSolid(M, seat, options.channelClear, outer);
   let cut: ManifoldT, inner: ManifoldT;
   if (options.style === 'swept') {
@@ -223,15 +232,16 @@ export function buildChannel(M: ManifoldToplevel['Manifold'], spec: ChannelSpec,
   } else {
     // the magnet leaves the seat along the swept transition (as tight as the swept channel), and the rectangular
     // bore takes over once the whole silhouette has passed; a bore reaching back over the seat would open the wing's top
-    const clip = halfSpace(M, outAxis, faceLimit);
+    // (a channel whose second leg heads the way the seat faces, after a drop, as under the bear's wrists, never passes back over the seat)
+    const clip = dot(along, outAxis) > 0 ? M.cube([600, 600, 600], true) : halfSpace(M, outAxis, faceLimit);
     const L1 = l1 - l0;
     const start = Math.min(L1 - 0.5, options.boreStart ?? L1 - 0.5);
-    const transition = sweep(M, seatGrown, c, [...(spec.drop > 0 ? [junction] : []), add(junction, along, L1)]);
+    const transition = sweep(M, seatGrown, c, [...via, add(junction, along, L1)]);
     cut = M.union([transition, boreSolid(0, start, lMouth + extra).intersect(clip)]);
     inner = boreSolid(options.keyClear, start, lMouth + extra).intersect(clip);
   }
   // where the magnet travels snugly: the key stops short of it
-  const magnetZone = sweep(M, seatSolid(M, seat, options.channelClear + options.keyGap, outer), c, spec.drop > 0 ? [junction] : [add(c, along, 0.01)]);
+  const magnetZone = sweep(M, seatSolid(M, seat, options.channelClear + options.keyGap, outer), c, via.length ? via : [add(c, along, 0.01)]);
   let behindMagnet: ManifoldT;
   if (options.style === 'flat' && options.keyEnd === 'level' && spec.levelEnd !== false) {
     // level with the goose's layers: a horizontal plane under the lowest point of the magnet's travel

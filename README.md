@@ -235,9 +235,10 @@ node src/build-goose.ts goose/goose.3mf goose/goose.stl --voids goose/goose-void
 #     --style swept|flat, --key side|upright, --clear/--key-clear/--gap/--proud for the tolerances (the app's Goose tab has the same)
 node src/build-slots.ts --out goose/goose-slots.3mf
 
-# 0c. the sea otter: paint, flat base, magnet seats; writes goose/otter.stl, otter-colors.json, otter-profile.json
+# 0c. the sea otter and the bear: paint, flat base, magnet seats; writes goose/<id>.stl, <id>-colors.json, <id>-profile.json
 #     (--painted out.3mf for the painted figure, --print out.3mf [--style/--key/--clear/--key-clear/--gap] for the slide-in print)
 npm run build-otter
+npm run build-bear
 
 # 1. find cylindrical magnet voids in a model, write goose/profile.json
 #    (GOOSE_DEBUG=1 prints why each candidate patch was rejected)
@@ -283,7 +284,7 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src/threemf.ts` reads a 3MF project (parts, transforms, negative parts)
 - `src/build-goose.ts` unions the 3MF parts into the one goose solid, cutting the mapped voids
 - `src/slots.ts`, `src/slots-build.ts`, `src/build-slots.ts` slide-in magnet channels from each seat to a covered mouth (swept or flat bore), their keys, the beak's registration pocket, and the print 3MF (the app's Goose tab uses the same); `src/render.ts` draws solids to PNG
-- `src/otter.ts`, `src/build-otter.ts` the sea otter: paint from the sculpt, flat base, magnet seats, slide-in channels from the base and the print 3MF; `src/characters.ts` the characters the app offers
+- `src/otter.ts`, `src/bear.ts` the sea otter and the bear: paint from the sculpt, flat base, magnet seats, channel plans; `src/desk-character.ts` what they share (the watershed paint, seat placement, slide-in channels and the print layout); `src/slide-in-characters.ts` the two side by side for `src/build-character.ts` (the CLI) and the app; `src/characters.ts` the characters the app offers
 - `src/map-voids.ts` carries negative parts from one 3MF onto another and turns them into magnet points
 - `src/stl.ts` STL read/write, welds the triangle soup into a shared-vertex mesh
 - `src/voids.ts` finds the cylindrical magnet voids in the goose
@@ -304,5 +305,5 @@ guess is wrong, and add `"polarityOut": "N"` or `"S"` per point once known.
 - `src-tauri/` the desktop shell: the library's file commands and the Save dialog for exports
 - `scripts/smoke.mjs` headless Playwright run of the built app; `scripts/library-smoke.mjs` the same for the library
 - `test/` end-to-end test on a synthetic goose (sphere with four voids)
-- `goose/` the bundled goose model and its fit profile, and the otter's (`otter.stl`, `otter-colors.json`, `otter-profile.json`)
-- `characters/otter/otter-source.stl` Jerred's otter model, the source of `npm run build-otter`
+- `goose/` the bundled goose model and its fit profile, and the otter's and the bear's (`otter.stl`, `otter-colors.json`, `otter-profile.json`, and the same for `bear`)
+- `characters/otter/otter-source.stl` Jerred's otter model, the source of `npm run build-otter`; `characters/bear/bear-source.stl` his "Bear V1", simplified to 0.02 mm, the source of `npm run build-bear`

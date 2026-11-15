@@ -1,5 +1,5 @@
-// Browser UI around the fitting pipeline: a desk character (the goose, or
-// the sea otter) with its magnet points, an accessory placed at one of them,
+// Browser UI around the fitting pipeline: a desk character (the goose, the
+// sea otter or the bear) with its magnet points, an accessory placed at one of them,
 // Fit, export. Plus the magnet-hole tool and the slide-in-magnet print.
 
 import * as THREE from 'three';
@@ -29,7 +29,8 @@ import { write3mf, write3mfBuild, write3mfParts, zipStore, type BuildObject, typ
 import { parse3mf, type Part } from '../threemf-parse.ts';
 import { buildSlots, layoutBuild, type SlotsBuild } from '../slots-build.ts';
 import { DEFAULT_SLOTS, type SlotOptions } from '../slots.ts';
-import { buildOtterSlots, layoutOtter, otterPaint, type OtterSlotsBuild } from '../otter.ts';
+import { characterPaint, layoutCharacter, type CharacterSlotsBuild } from '../desk-character.ts';
+import { buildSlideIn, slideInCharacter } from '../slide-in-characters.ts';
 import { characterOf, CHARACTERS, type Character } from '../characters.ts';
 import { splitByMaterial } from '../split-colours.ts';
 import { PaintState } from './paint.ts';
@@ -460,7 +461,7 @@ function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
 
 // ---------- accessory ----------
 // sensible widths for a model at each point, mm, shown as the placeholder
-const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24, chest: 22 };
+const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24, chest: 22, mouth: 20, left_wrist: 18, right_wrist: 18 };
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 let loadSerial = 0;
@@ -795,7 +796,7 @@ async function buildFlatNow() {
     status(`Picture failed: ${(err as Error).message}`);
   }
 }
-/** The character's forward direction in the plane: the profile's own (the otter's), else from the head point to the beak point. */
+/** The character's forward direction in the plane: the profile's own (the otter's and the bear's), else from the head point to the beak point. */
 function forwardOnGoose(): V3 {
   if (profile.forward) return profile.forward;
   const h = profile.points.head, b = profile.points.beak;
@@ -1410,7 +1411,7 @@ function applyFocus() {
 /** Everything shown that the view should take in: the part alone when the goose is hidden. */
 function subjectBox(): THREE.Box3 {
   const box = new THREE.Box3();
-  if (tab === 'goose' && (slotsBuilt || otterBuilt)) return box.setFromObject(slotsGroup);
+  if (tab === 'goose' && (slotsBuilt || figureBuilt)) return box.setFromObject(slotsGroup);
   const part = focusSubject();
   if (focusOn() && part) return box.setFromObject(part);
   for (const o of [gooseObject, part, bandObject && bandObject.visible ? bandObject : null]) if (o) box.expandByObject(o);
@@ -1811,7 +1812,7 @@ function setTab(name: string) {
   slotsGroup.visible = name === 'goose';
   accessoryPivot.visible = name !== 'goose';
   if (fittedObject) fittedObject.visible = name !== 'goose';
-  if (name === 'goose' && !slotsBuilt && !otterBuilt && !slotsBuilding) void buildSlotsNow();
+  if (name === 'goose' && !slotsBuilt && !figureBuilt && !slotsBuilding) void buildSlotsNow();
   if (name !== 'accessory') { showGizmo(false); setMoveMode(false); }
   drawOverlay();
   // in paint mode the left button paints and the right button orbits
@@ -2116,13 +2117,15 @@ function download(name: string, bytes: Uint8Array) {
 }
 
 
-// ---------- the print tab (Goose, or Otter): the slide-in-magnet print ----------
+// ---------- the print tab (Goose, Otter or Bear): the slide-in-magnet print ----------
 // The goose's is built from the project 3MFs served beside it (goose.3mf, goose-voids.3mf) with src/slots-build.ts, the
-// same code as `npm run build-slots`; the otter's from the otter in the view with src/otter.ts, as `npm run build-otter`.
+// same code as `npm run build-slots`; the otter's and the bear's from the one in the view with their plans in
+// src/slide-in-characters.ts, as `npm run build-otter` / `npm run build-bear`.
 // Shown in place of the fitting character, exported as a print 3MF or a zip of STLs.
 let slotsSource: { parts: Part[]; voids: Part[] } | null = null;
 let slotsBuilt: SlotsBuild | null = null;
-let otterBuilt: OtterSlotsBuild | null = null;
+/** the otter's or the bear's build */
+let figureBuilt: CharacterSlotsBuild | null = null;
 let slotsObjects: BuildObject[] | null = null;
 let slotsBuilding = false;
 const slotsGroup = new THREE.Group();
@@ -2146,6 +2149,11 @@ const SLOT_VERSION_NOTES: Record<Character['id'], Record<string, string>> = {
     upright: 'The same bore; the keys print standing on the end that is part of the base, so it has the base\'s finish. They lean like their channels and the head key is about 114 mm tall: give it a brim.',
     swept: 'The magnet\'s own shape swept along each channel: a round bore up to the head, a flattened one to the chest. The keys print standing on their base end; give the head key a brim.',
   },
+  bear: {
+    side: 'A rectangular bore square to each channel; the keys are flat bars that lie on a side to print. The wrist channels bend in under the arms, and their keys stop at the bend: a drop of glue holds each wrist magnet.',
+    upright: 'The same bore; the head and wrist keys print standing on the end that is part of the base, so it has the base\'s finish (the head key is about 111 mm tall: give it a brim). The short mouth key, which closes under the chin, lies on its side.',
+    swept: 'The magnet\'s own shape swept along each channel, so the channels are as small as they can be. The head and wrist keys print standing on their base end (give the head key a brim); the short mouth key lies beside them.',
+  },
 };
 const slotVersionNote = () => SLOT_VERSION_NOTES[character.id][$<HTMLSelectElement>('slots-version').value] ?? '';
 function slotOptions(): SlotOptions {
@@ -2165,7 +2173,7 @@ function slotOptions(): SlotOptions {
 }
 /** Forgets the build (another character, or the one in the view changed). */
 function resetSlots() {
-  slotsBuilt = null; otterBuilt = null; slotsObjects = null;
+  slotsBuilt = null; figureBuilt = null; slotsObjects = null;
   for (const o of [...slotsGroup.children]) { slotsGroup.remove(o); (o as THREE.Mesh).geometry?.dispose(); }
   $('slots-result').textContent = 'Not built yet.';
   for (const id of ['export-slots-3mf', 'export-slots-stl']) $<HTMLButtonElement>(id).disabled = true;
@@ -2180,12 +2188,13 @@ async function buildSlotsNow() {
   try {
     const options = slotOptions();
     let channels: Record<string, { length: number; bore: [number, number]; key: ManifoldT; tongue: ManifoldT | null }>, notes: string[];
-    if (c.id === 'otter') {
-      const b = await buildOtterSlots(gooseManifold, profile, options, () => {});
+    const figure = slideInCharacter(c.id);
+    if (figure) {
+      const b = await buildSlideIn(figure, gooseManifold, profile, options, () => {});
       if (c !== character) return;
       resetSlots();
-      otterBuilt = b;
-      slotsObjects = layoutOtter(b, otterPaint(b, gooseFirstID));
+      figureBuilt = b;
+      slotsObjects = layoutCharacter(b, characterPaint(b, gooseFirstID), c.id);
       ({ channels, notes } = b);
     } else {
       if (!slotsSource) {
@@ -2221,10 +2230,10 @@ function showSlots() {
   for (const o of [...slotsGroup.children]) { slotsGroup.remove(o); (o as THREE.Mesh).geometry?.dispose(); }
   const add = (m: ManifoldT, material: THREE.Material) => slotsGroup.add(new THREE.Mesh(toGeometry(fromManifold(m)), material));
   const showKeys = $<HTMLInputElement>('slots-show-keys').checked, showMagnets = $<HTMLInputElement>('slots-show-magnets').checked;
-  if (otterBuilt) {
-    const body = fromManifoldTagged(otterBuilt.body, gooseFirstID, gooseMaterials.length, gooseFallback);
+  if (figureBuilt) {
+    const body = fromManifoldTagged(figureBuilt.body, gooseFirstID, gooseMaterials.length, gooseFallback);
     slotsGroup.add(new THREE.Mesh(colouredGeometry(body.mesh, body.faceMaterial, gooseMaterials), gooseColouredMaterial));
-    for (const ch of Object.values(otterBuilt.channels)) {
+    for (const ch of Object.values(figureBuilt.channels)) {
       if (showKeys) add(ch.key, slotsMaterials.key);
       if (showMagnets) add(ch.magnet, slotsMaterials.magnet);
     }
@@ -2246,7 +2255,8 @@ for (const id of ['slots-show-keys', 'slots-show-beak', 'slots-show-magnets']) $
 const slotFileName = (o: { name: string }, p: { name: string }) => `${o.name === p.name ? p.name : `${o.name}-${p.name}`}.stl`.replace(/\s+/g, '-');
 $('export-slots-3mf').onclick = () => {
   if (!slotsObjects) return;
-  if (otterBuilt) download('otter-slots.3mf', write3mfBuild(slotsObjects, gooseMaterials, 'Sea otter, slide-in magnets'));
+  const figure = slideInCharacter(character.id);
+  if (figureBuilt && figure) download(`${figure.id}-slots.3mf`, write3mfBuild(slotsObjects, gooseMaterials, `${figure.name}, slide-in magnets`));
   else if (slotsBuilt) download('goose-slots.3mf', write3mfBuild(slotsObjects, slotsBuilt.materials, 'Gus Gus Goose, slide-in magnets'));
 };
 $('export-slots-stl').onclick = () => { if (slotsObjects) download(`${character.id}-slots-parts.zip`, zipStore(slotsObjects.flatMap((o) => o.parts.map((p) => [slotFileName(o, p), serializeStl(p.mesh)] as [string, Uint8Array])))); };
@@ -2551,7 +2561,7 @@ if (isDesktop()) document.documentElement.classList.add('desktop');
     return { min, max };
   },
   get moveMode() { return moveMode; },
-  get slots() { const b = slotsBuilt ?? otterBuilt; return b ? { channels: Object.keys(b.channels), objects: slotsObjects?.map((o) => o.name) ?? [], shown: slotsGroup.visible && slotsGroup.children.length, notes: b.notes } : null; },
+  get slots() { const b = slotsBuilt ?? figureBuilt; return b ? { channels: Object.keys(b.channels), objects: slotsObjects?.map((o) => o.name) ?? [], shown: slotsGroup.visible && slotsGroup.children.length, notes: b.notes } : null; },
   get character() { return characterReady; },
   lookAt(target: V3, position: V3) { controls.target.set(...target); camera.position.set(...position); controls.update(); },
   get camera() { return { position: camera.position.toArray(), target: controls.target.toArray() }; },

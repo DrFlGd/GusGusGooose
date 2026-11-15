@@ -4,7 +4,7 @@
 // folder. Pure: the app and the tests share it.
 
 export interface Character {
-  id: 'goose' | 'otter';
+  id: 'goose' | 'otter' | 'bear';
   /** for headings */
   name: string;
   /** the word in a sentence: "fit to the goose" */
@@ -17,6 +17,7 @@ export interface Character {
 export const CHARACTERS: Record<Character['id'], Character> = {
   goose: { id: 'goose', name: 'Goose', word: 'goose', files: { stl: 'goose.stl', profile: 'profile.json', colors: 'goose-colors.json' }, clothing: true },
   otter: { id: 'otter', name: 'Sea otter', word: 'otter', files: { stl: 'otter.stl', profile: 'otter-profile.json', colors: 'otter-colors.json' }, clothing: false },
+  bear: { id: 'bear', name: 'Bear', word: 'bear', files: { stl: 'bear.stl', profile: 'bear-profile.json', colors: 'bear-colors.json' }, clothing: false },
 };
 
 export const characterOf = (id: string | null | undefined): Character => CHARACTERS[id as Character['id']] ?? CHARACTERS.goose;
