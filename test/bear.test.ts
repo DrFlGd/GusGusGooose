@@ -12,7 +12,7 @@ import { expandRuns } from '../src/goose-colors.ts';
 import { fromManifold, manifold, toManifoldTagged } from '../src/fit.ts';
 import { BEAR_MATERIALS, BLACK, BROWN, buildBearSlots, paintBear, WRIST_SEAT } from '../src/bear.ts';
 import { characterKeyDown, characterPaint, layoutCharacter, rayHit, wholeFaceCodes } from '../src/desk-character.ts';
-import { DEFAULT_SLOTS, type SlotOptions, type V3 } from '../src/slots.ts';
+import { DEFAULT_SLOTS, sweep, type SlotOptions, type V3 } from '../src/slots.ts';
 import { CHARACTERS } from '../src/characters.ts';
 import { SLIDE_IN_CHARACTERS } from '../src/slide-in-characters.ts';
 import { write3mfBuild } from '../src/threemf-write.ts';
@@ -132,6 +132,9 @@ for (const version of Object.keys(VERSIONS)) {
         assert.ok(Math.abs(reach - (face[0] * ax[0] + face[1] * ax[1] + face[2] * ax[2])) < 0.01, `${name}: the channel reaches the seat's face and no further`);
       }
       assert.ok(ch.magnet.subtract(ch.cut).volume() < 1e-6, `${name}: a magnet fits`);
+      // and gets there: the magnet slides from the mouth, round any bend, into its seat without touching the bear
+      const travel = sweep(Manifold, ch.magnet, ch.spec.seat.center, [...(ch.spec.via ?? []), ch.spec.mouth]);
+      assert.ok(travel.intersect(b.bodySolid).subtract(ch.cut).volume() < 1e-6, `${name}: the magnet slides all the way in`);
       // the key: inside its channel and the bear, short of the magnet; flush with the base when it closes one there
       assert.ok(ch.key.volume() > (name === 'mouth' ? 200 : 2500), `${name} has a key`);
       assert.ok(ch.key.subtract(ch.cut).volume() < 1e-6, `${name}: key inside the channel`);

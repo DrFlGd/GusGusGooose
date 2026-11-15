@@ -584,7 +584,11 @@ its straight leg):
 - wrists: the magnet slides level back out of the forearm, turns in behind
   the arm (twice for the left one, which joins the body through a narrow
   neck) and sinks a little, then runs straight down to the base. The key
-  fills the straight leg only, so a drop of glue holds each wrist magnet.
+  fills the straight leg only (the bend, 16 mm on the left and 11 mm on
+  the right, stays empty), so a drop of glue holds each wrist magnet. To
+  get the magnet round the bend: push it up the straight leg, then lay the
+  bear on its face; the bent part then runs downhill into the seat. The
+  test sweeps each magnet along its whole route to check it never touches.
 - Scanned like the others: one opening each, no notes, the channels at
   least 3 mm apart, 1.2 mm of wall everywhere except one spot behind the
   left arm where the channel passes a notch in the fur (0.6 to 0.8 mm,
