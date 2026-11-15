@@ -2151,7 +2151,7 @@ const SLOT_VERSION_NOTES: Record<Character['id'], Record<string, string>> = {
   },
   bear: {
     side: 'A rectangular bore square to the head\'s channel; the key is a flat bar that lies on a side to print. The paws\' magnets go into their open pockets from below, with glue.',
-    upright: 'The same bore; the head key prints standing on the end that is part of the base, so it has the base\'s finish. It is about 111 mm tall: give it a brim.',
+    upright: 'The same bore; the head key prints standing on the end that is part of the base, so it has the base\'s finish. It is about 109 mm tall: give it a brim.',
     swept: 'The magnet\'s own shape swept along the head\'s channel, so the channel is as small as it can be. The key prints standing on its base end; give it a brim.',
   },
 };

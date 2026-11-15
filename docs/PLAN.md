@@ -567,13 +567,16 @@ area-majority smoothing (`smoothBorders`) take the teeth off the borders.
 **Base.** 2.5 mm off the bottom gives one flat footing of 2,221 mm2; the
 cut is brown.
 
-**Head.** The goose's 10.2 x 4.2 seat on the crown, axis up, where the
-curls are flattest across the magnet (the highest curl would leave 4 to 6
-mm over it); 2.25 mm of plastic at the centre, 1.2 least. Its channel
-(`BEAR_PLANS`) runs from the crown down and back through the body to the
-base at (26, 58): one opening, 1.2 mm of wall everywhere, the magnet slides
-the whole way (the test sweeps it). The key is about 111 mm long (12 cm3);
-brim it when it prints upright.
+**Head.** The goose's 10.2 x 4.2 seat in the middle of the top of the
+head (`HEAD_TOP`, (34, 38): the centroid of the head's section 104 to 110
+mm up; the head leans, so the face is centred on x 37.3 instead), axis up,
+under at least 1.2 mm of plastic (3.7 mm at the centre, which is on a
+curl). Jerred asked for it there (2026-11-15) after the first version put
+it 2 mm to the side and 4 mm forward, on the flattest spot of the crown.
+Its channel (`BEAR_PLANS`) runs straight down through the middle of the
+head and body to the base under it: one opening, 1.2 mm of wall
+everywhere, and the magnet slides the whole way (the test sweeps it). The
+key is about 109 mm long (11 cm3); brim it when it prints upright.
 
 **Paws.** Open pockets, 8.2 x 4.2 for 8 x 4 mm magnets, pushed in from
 below and glued. Each pocket's axis is square to the underside there (a

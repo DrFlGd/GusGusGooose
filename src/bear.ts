@@ -82,10 +82,13 @@ export const PAW_SEAT = { diameter: 8.2, depth: 4.2 };
  */
 export const PAWS: Record<string, [number, number]> = { left_paw: [48.5, 14.5], right_paw: [25.5, 12] };
 
-/** The candidate seat with the least plastic over its centre: where the curly surface is flattest across the magnet. */
-function flattest(seats: MagnetVoid[]): MagnetVoid {
-  return seats.reduce((a, b) => (b.skin! < a.skin! - 1e-6 ? b : a));
-}
+/**
+ * The middle of the top of the head (x, y; trimmed frame): the centroid of
+ * the head's cross-section 104 to 110 mm up (2026-11-15). The face is centred
+ * on x 37.3, as the head leans a little, so the crown's middle is not the
+ * face's.
+ */
+export const HEAD_TOP: [number, number] = [34, 38];
 
 /**
  * An open pocket under a paw at (x, y): its axis square to the underside
@@ -112,24 +115,18 @@ export function pawPocket(mesh: IndexedMesh, x: number, y: number, seat = PAW_SE
 
 /**
  * The three seats, found on the trimmed model:
- * - head: on the crown, axis straight up, where the curls are flattest
- *   across the magnet (the top is lumpy, so the very highest curl would
- *   leave 4 to 6 mm of plastic over the magnet's centre), sealed under the
- *   skin and reached by a slide-in channel;
+ * - head: in the middle of the top of the head (HEAD_TOP), axis straight
+ *   up, sealed under at least 1.2 mm (3.7 at the centre, which is on a
+ *   curl) and reached by a slide-in channel;
  * - left_paw, right_paw: open pockets under each paw (PAWS), 8 x 4 mm,
  *   glued in from below.
  */
 export function bearSeats(mesh: IndexedMesh): Record<string, MagnetVoid> {
-  // the crown: the head's top within 3 mm of its highest point
-  // (the searches cast their rays against the part of the bear round each place only)
+  // (the rays are cast against the part of the bear round each place only)
   const crown = cropMesh(mesh, [10, 15, 90], [60, 60, 200]);
-  const tops: { q: V3; z: number }[] = [];
-  for (let x = 28; x <= 42; x += 1) for (let y = 30; y <= 44; y += 1) {
-    const hit = rayHit(crown, [x, y, 150], [0, 0, -1]);
-    if (hit.face >= 0) tops.push({ q: [x, y, 150 - hit.t], z: 150 - hit.t });
-  }
-  const zTop = Math.max(...tops.map((t) => t.z));
-  const head = flattest(tops.filter((t) => t.z > zTop - 3).map((t) => placeSeat(crown, t.q, [0, 0, 1])));
+  const [hx, hy] = HEAD_TOP;
+  const top = rayHit(crown, [hx, hy, 150], [0, 0, -1]);
+  const head = placeSeat(crown, [hx, hy, 150 - top.t], [0, 0, 1]);
   const arms = cropMesh(mesh, [10, -10, 35], [70, 40, 75]);
   const paws = Object.fromEntries(Object.entries(PAWS).map(([name, [x, y]]) => [name, pawPocket(arms, x, y)]));
   return { head, ...paws };
@@ -188,13 +185,14 @@ export async function buildBearBody(source: IndexedMesh, paint: Uint8Array, log 
 // ---------- slide-in channel ----------
 
 /**
- * The head's channel: from the crown down and back through the body to
- * the base, scanned (2026-11-15) to open once and keep 1.2 mm of
- * wall; its key is about 111 mm long, like the otter's. The paws' pockets
- * are open, so they have no channel.
+ * The head's channel: straight down from the seat through the middle of
+ * the head and body to the base, so it is upright from the front and the
+ * side; scanned (2026-11-15) to open once and keep 1.2 mm of wall. Its key
+ * is about 110 mm long, like the otter's. The paws' pockets are open, so
+ * they have no channel.
  */
 export const BEAR_PLANS: Record<string, ChannelPlan> = {
-  head: { mouth: [26, 58, 0] },
+  head: { mouth: [HEAD_TOP[0], HEAD_TOP[1], 0] },
 };
 
 /** The slide-in print from the app's bear (`body`, seats already cut, and its profile). */

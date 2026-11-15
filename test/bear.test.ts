@@ -73,7 +73,7 @@ test('the app\'s bear stands on a flat base, its colours line up with the STL, a
   assert.equal(SLIDE_IN_CHARACTERS.bear.source, 'characters/bear/bear-source.stl');
 });
 
-test('the head\'s seat takes the goose\'s magnet under at least 1.2 mm, straight up on the crown', () => {
+test('the head\'s seat takes the goose\'s magnet under at least 1.2 mm, straight up in the middle of the crown', async () => {
   assert.deepEqual(Object.keys(profile.points), ['head', 'left_paw', 'right_paw']);
   const p = profile.points.head;
   assert.ok(Math.abs(p.diameter - goose.points.head.diameter) < 0.01 && Math.abs(p.depth - goose.points.head.depth) < 0.01, `head: ${p.diameter} x ${p.depth}`);
@@ -89,6 +89,15 @@ test('the head\'s seat takes the goose\'s magnet under at least 1.2 mm, straight
   }
   assert.ok(least > 1.15 && least < 3, `head: ${least.toFixed(2)} mm over the magnet`);
   assert.ok(p.axis[2] > 0.99, 'head axis straight up');
+  // in the middle of the top of the head: within a millimetre of the centroid of the head's section 106 mm up
+  const { solid } = await body;
+  let A = 0, cx = 0, cy = 0;
+  for (const poly of solid.slice(106).toPolygons()) for (let i = 0; i < poly.length; i++) {
+    const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length];
+    const c = x0 * y1 - x1 * y0; A += c; cx += (x0 + x1) * c; cy += (y0 + y1) * c;
+  }
+  cx /= 3 * A; cy /= 3 * A;
+  assert.ok(Math.hypot(p.center[0] - cx, p.center[1] - cy) < 1, `head at (${p.center[0].toFixed(1)}, ${p.center[1].toFixed(1)}), the crown's middle at (${cx.toFixed(1)}, ${cy.toFixed(1)})`);
 });
 
 test('the paws: open 8 x 4 mm pockets underneath, at least 1.2 mm of plastic round and over, the magnet goes in from below', async () => {
@@ -150,6 +159,9 @@ for (const version of Object.keys(VERSIONS)) {
       assert.equal(ch.tongue, null);
     }
     assert.deepEqual(Object.keys(b.channels), ['head'], 'the paws have no channel');
+    // the channel runs straight down
+    const d = b.channels.head.direction;
+    assert.ok(d[2] < -0.999, `the head's channel runs straight down: (${d.map((v) => v.toFixed(3)).join(', ')})`);
   });
 }
 
