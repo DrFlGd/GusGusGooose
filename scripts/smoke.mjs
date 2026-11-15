@@ -540,32 +540,32 @@ console.log('7b.', await page.locator('#fit-result').textContent());
 await page.click('#view-front');
 await page.screenshot({ path: join(out, '7b-otter-chest.png') });
 
-// the bear: a third character, four points (the wrists take 8 x 3 mm magnets); its print tab builds the slide-in bear
+// the bear: a third character, three points (the head's slides in, the paws' are open 8 x 4 mm pockets); its print tab builds the slide-in bear
 await page.selectOption('#character', 'bear');
 await page.waitForFunction(() => window.__goose.character === 'bear', null, { timeout: 60000 });
 await page.click('.tabs button[data-tab="goose"]');
 await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Slide-in bear built'), null, { timeout: 180000 });
 const bear = await page.evaluate(() => ({
   character: window.__goose.character, points: Object.keys(window.__goose.profile.points).sort(), slots: window.__goose.slots,
-  wrist: window.__goose.profile.points.left_wrist.diameter,
+  paw: window.__goose.profile.points.left_paw.diameter,
   tab: document.getElementById('print-tab-button').textContent, clothing: document.getElementById('clothing-tab-button').disabled,
   positions: [...document.querySelectorAll('#point option')].map((o) => o.value), fit: document.getElementById('fit').textContent,
 }));
 console.log('7d. bear:', await status(), JSON.stringify(bear));
-if (bear.character !== 'bear' || bear.points.join() !== 'head,left_wrist,mouth,right_wrist' || bear.wrist !== 8.2) throw new Error('the bear did not load its points');
-if (bear.slots?.channels.join() !== 'head,mouth,left_wrist,right_wrist' || bear.slots.objects.join() !== 'bear,key head,key mouth,key left wrist,key right wrist' || bear.slots.notes.length) throw new Error('the slide-in bear did not build');
+if (bear.character !== 'bear' || bear.points.join() !== 'head,left_paw,right_paw' || bear.paw !== 8.2) throw new Error('the bear did not load its points');
+if (bear.slots?.channels.join() !== 'head' || bear.slots.objects.join() !== 'bear,key head' || bear.slots.notes.length) throw new Error('the slide-in bear did not build');
 if (bear.tab !== 'Bear' || !bear.clothing || bear.positions.includes('neck') || bear.fit !== 'Fit to the bear') throw new Error('the panel still speaks of the otter');
 await page.screenshot({ path: join(out, '7d-bear-slots.png') });
-// a small puck under the bear's left wrist, as if held under the paw
+// a small puck under the bear's left paw, as if held there
 await page.click('.tabs button[data-tab="accessory"]');
 await page.setInputFiles('#accessory-file', { name: 'puck.stl', mimeType: 'application/octet-stream', buffer: Buffer.from(puckStl(7, 7, 64)) });
 await page.waitForFunction(() => document.getElementById('status').textContent.includes('Place it'), null, { timeout: 30000 });
-await page.selectOption('#point', 'left_wrist');
+await page.selectOption('#point', 'left_paw');
 await page.click('#fit');
 await page.waitForFunction(() => document.getElementById('fit-result').textContent.startsWith('Fitted'), null, { timeout: 120000 });
-console.log('7e. bear wrist:', await page.locator('#fit-result').textContent());
+console.log('7e. bear paw:', await page.locator('#fit-result').textContent());
 await page.click('#view-front');
-await page.screenshot({ path: join(out, '7e-bear-wrist.png') });
+await page.screenshot({ path: join(out, '7e-bear-paw.png') });
 await page.selectOption('#character', 'goose');
 await page.waitForFunction(() => window.__goose.character === 'goose', null, { timeout: 60000 });
 const back = await page.evaluate(() => ({ points: Object.keys(window.__goose.profile.points).length, clothing: document.getElementById('clothing-tab-button').disabled, tab: document.getElementById('print-tab-button').textContent }));

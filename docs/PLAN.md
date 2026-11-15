@@ -547,7 +547,11 @@ character and reopen on it.
 Jerred sent "Bear V1" (a curly bear sitting up with its paws raised, 65 x
 80 x 118 mm, 37 MB) and asked for it as a third character, with magnets in
 the mouth, the top of the head and the wrists, "so it looks like he is
-holding things under his paws". There was no concept art this time.
+holding things under his paws". There was no concept art this time. After
+the first version (2026-11-15) he changed how they go in: keep the head's
+slide-in channel, drop the mouth magnet, and put the paw magnets in from
+the bottom in open pockets, glued, with no channel; 10 x 4 mm at most, 8 x
+3 or 8 x 4 in the paws.
 
 **Model.** Simplified with Manifold to 0.02 mm (191,350 triangles, 9.6 MB;
 nothing visible changes) as `characters/bear/bear-source.stl`. `npm run
@@ -563,45 +567,34 @@ area-majority smoothing (`smoothBorders`) take the teeth off the borders.
 **Base.** 2.5 mm off the bottom gives one flat footing of 2,221 mm2; the
 cut is brown.
 
-**Seats** (with at least 1.2 mm of plastic over each magnet):
-- head: 10.2 x 4.2, on the crown, axis up, where the curls are flattest
-  across the magnet (the highest curl would leave 4 to 6 mm over it); 2.25
-  mm at the centre.
-- mouth: 10.2 x 4.2, in the front of the muzzle under the nose, axis square
-  to it (forward, 7 degrees down), 2.6 mm at the centre.
-- wrists: 8.2 x 3.2 for 8 x 3 mm magnets, under each forearm just behind
-  the hanging paw (y 15), axis straight down, so an accessory sits under
-  the paw. A 10 mm magnet would not slide back through where the left
-  forearm joins the body (Jerred was asked; 8 x 3 is the recommendation).
+**Head.** The goose's 10.2 x 4.2 seat on the crown, axis up, where the
+curls are flattest across the magnet (the highest curl would leave 4 to 6
+mm over it); 2.25 mm of plastic at the centre, 1.2 least. Its channel
+(`BEAR_PLANS`) runs from the crown down and back through the body to the
+base at (26, 58): one opening, 1.2 mm of wall everywhere, the magnet slides
+the whole way (the test sweeps it). The key is about 111 mm long (12 cm3);
+brim it when it prints upright.
 
-**Channels** (`BEAR_PLANS`; `ChannelSpec.via` lets a channel bend before
-its straight leg):
-- head: from the crown down through the back of the body to the base at
-  (26, 58).
-- mouth: down and back from the seat to the underside of the beard at
-  (37.3, 14, 74.3), where its key sits flush under the chin; a channel to
-  the base would have had to cross the head's.
-- wrists: the magnet slides level back out of the forearm, turns in behind
-  the arm (twice for the left one, which joins the body through a narrow
-  neck) and sinks a little, then runs straight down to the base. The key
-  fills the straight leg only (the bend, 16 mm on the left and 11 mm on
-  the right, stays empty), so a drop of glue holds each wrist magnet. To
-  get the magnet round the bend: push it up the straight leg, then lay the
-  bear on its face; the bent part then runs downhill into the seat. The
-  test sweeps each magnet along its whole route to check it never touches.
-- Scanned like the others: one opening each, no notes, the channels at
-  least 3 mm apart, 1.2 mm of wall everywhere except one spot behind the
-  left arm where the channel passes a notch in the fur (0.6 to 0.8 mm,
-  under 0.1 mm3). Lowering the route there thins the underside of the
-  forearm instead.
-- Keys: head about 111 mm (12 cm3, brim it when upright), wrists about 4
-  cm3, mouth 0.35 cm3 (it lies down in every version, as its mouth is not
-  in the base).
+**Paws.** Open pockets, 8.2 x 4.2 for 8 x 4 mm magnets, pushed in from
+below and glued. Each pocket's axis is square to the underside there (a
+plane fitted across the magnet, 20 degrees or so off straight down), and
+its mouth is level with the underside's highest point across the magnet,
+so the magnet sits wholly inside the paw and the pocket opens through the
+lower curls round it (up to 1.8 mm on the left, 3.6 on the right). The
+spots (`PAWS`: left (48.5, 14.5), right (25.5, 12)) come from a scan of the
+undersides for at least 1.2 mm of plastic round and over the pocket and
+the most even underside. The forearms are only about 13 mm across: 10 x 4
+keeps 1.2 mm in a handful of spots, 5.8 mm up inside the paw, so 8 x 4 it
+is (8 x 3 gains no wall, only depth). The fit fills the pocket from its
+mouth inward, so an accessory there grows a short boss up into the opening
+and its magnet meets the paw's across the clearance. The pockets face
+down: the slicer's support under the paws will reach into them.
 
 **App.** `bear` in `CHARACTERS`; the otter and the bear share the print tab
-code through `SLIDE_IN_CHARACTERS` (plans, materials, title). The accessory
-pockets follow each point's own seat, so a wrist accessory gets an 8 mm
-pocket by default.
+code through `SLIDE_IN_CHARACTERS` (plans, materials, title). The paw
+points are `mode: 'open'`, so they have no channel and stay open in the
+print; the accessory pockets follow each point's own seat, so a paw
+accessory gets an 8 mm pocket by default.
 
 ## Still needed from Jerred
 

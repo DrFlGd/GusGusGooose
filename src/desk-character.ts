@@ -317,10 +317,6 @@ export interface ChannelPlan {
   mouth: V3;
   drop?: number;
   dropAxis?: V3;
-  /** points the seat's centre passes through before the straight leg (see ChannelSpec.via) */
-  via?: V3[];
-  /** false for a channel whose key must keep a square inner end in the upright version (its mouth is not in the base, so it does not print standing) */
-  levelEnd?: boolean;
 }
 
 export interface CharacterSlotsBuild {
@@ -338,7 +334,7 @@ export interface CharacterSlotsBuild {
  * The slide-in print from a character's body (`body`, seats already cut) and
  * its profile: a channel for each seat that has a plan, and a key that fills
  * it from the mouth up to the magnet, flush with the surface. No tongue:
- * nothing covers these mouths but the desk (or the character's own chin).
+ * nothing covers these mouths but the desk.
  */
 export async function buildCharacterSlots(body: ManifoldT, profile: FitProfile, plans: Record<string, ChannelPlan>, materials: Material[], options: SlotOptions = DEFAULT_SLOTS, log = (s: string) => console.log(s)): Promise<CharacterSlotsBuild> {
   const { Manifold } = await manifold();
@@ -350,10 +346,10 @@ export async function buildCharacterSlots(body: ManifoldT, profile: FitProfile, 
   const channels: Record<string, Channel> = {};
   for (const { name, p, seat } of seats) {
     const plan = plans[name];
-    const ch = buildChannel(Manifold, { seat, mouth: plan.mouth, drop: plan.drop ?? 0, dropAxis: plan.dropAxis, via: plan.via, tongue: false, levelEnd: plan.levelEnd }, p.axis, bodySolid, { ...options, tongue: null });
+    const ch = buildChannel(Manifold, { seat, mouth: plan.mouth, drop: plan.drop ?? 0, dropAxis: plan.dropAxis, tongue: false }, p.axis, bodySolid, { ...options, tongue: null });
     channels[name] = ch;
     const outside = ch.cut.subtract(bodySolid).decompose().filter((m) => m.volume() > 0.3);
-    log(`  ${name.padEnd(11)} channel ${ch.length.toFixed(1)} mm to (${plan.mouth.map((v) => +v.toFixed(1)).join(', ')})${plan.via ? ` by way of ${plan.via.map((v) => `(${v.join(', ')})`).join(', ')}` : plan.drop ? ` after ${plan.drop} mm along (${plan.dropAxis!.join(', ')})` : ''}, bore ${ch.bore[0].toFixed(1)} x ${ch.bore[1].toFixed(1)} mm, ${outside.length} opening${outside.length === 1 ? '' : 's'}; key ${ch.key.volume().toFixed(0)} mm³`);
+    log(`  ${name.padEnd(11)} channel ${ch.length.toFixed(1)} mm to (${plan.mouth.map((v) => +v.toFixed(1)).join(', ')})${plan.drop ? ` after ${plan.drop} mm along (${plan.dropAxis!.join(', ')})` : ''}, bore ${ch.bore[0].toFixed(1)} x ${ch.bore[1].toFixed(1)} mm, ${outside.length} opening${outside.length === 1 ? '' : 's'}; key ${ch.key.volume().toFixed(0)} mm³`);
     if (outside.length !== 1) notes.push(`${name}: the channel opens ${outside.length} times; it should open once.`);
   }
   const names = Object.keys(channels);

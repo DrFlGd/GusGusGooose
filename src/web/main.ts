@@ -461,7 +461,7 @@ function marker(p: MagnetVoid, active: boolean): THREE.Object3D {
 
 // ---------- accessory ----------
 // sensible widths for a model at each point, mm, shown as the placeholder
-const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24, chest: 22, mouth: 20, left_wrist: 18, right_wrist: 18 };
+const POINT_WIDTH: Record<string, number> = { head: 25, left_wing: 40, right_wing: 40, beak: 16, neck: 24, chest: 22, left_paw: 18, right_paw: 18 };
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 let loadSerial = 0;
@@ -2150,9 +2150,9 @@ const SLOT_VERSION_NOTES: Record<Character['id'], Record<string, string>> = {
     swept: 'The magnet\'s own shape swept along each channel: a round bore up to the head, a flattened one to the chest. The keys print standing on their base end; give the head key a brim.',
   },
   bear: {
-    side: 'A rectangular bore square to each channel; the keys are flat bars that lie on a side to print. The wrist channels bend in under the arms, and their keys stop at the bend: a drop of glue holds each wrist magnet.',
-    upright: 'The same bore; the head and wrist keys print standing on the end that is part of the base, so it has the base\'s finish (the head key is about 111 mm tall: give it a brim). The short mouth key, which closes under the chin, lies on its side.',
-    swept: 'The magnet\'s own shape swept along each channel, so the channels are as small as they can be. The head and wrist keys print standing on their base end (give the head key a brim); the short mouth key lies beside them.',
+    side: 'A rectangular bore square to the head\'s channel; the key is a flat bar that lies on a side to print. The paws\' magnets go into their open pockets from below, with glue.',
+    upright: 'The same bore; the head key prints standing on the end that is part of the base, so it has the base\'s finish. It is about 111 mm tall: give it a brim.',
+    swept: 'The magnet\'s own shape swept along the head\'s channel, so the channel is as small as it can be. The key prints standing on its base end; give it a brim.',
   },
 };
 const slotVersionNote = () => SLOT_VERSION_NOTES[character.id][$<HTMLSelectElement>('slots-version').value] ?? '';

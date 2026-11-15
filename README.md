@@ -53,7 +53,7 @@ the settings on the left, the view in the middle with buttons for iso,
 front, side and top views, Fit and Hide goose, and Export on the right
 (3MF with colours, STL, split by colour). Each side scrolls on its own and
 the view never scrolls; a button in the top bar switches between light and
-dark. It shows the goose in its filament colours with its magnet points; the Character picker in the top bar switches to the sea otter (head and chest magnets), and everything below works on whichever is shown, except clothing and the neck band, which are the goose's. The Goose (or Otter) tab builds the slide-in-magnet print (channels from each magnet seat to a covered mouth, flat or swept, with the tolerances as controls) and exports it as a 3MF or STLs. Load a downloaded model (STL, OBJ
+dark. It shows the goose in its filament colours with its magnet points; the Character picker in the top bar switches to the sea otter (head and chest magnets) or the bear (a head magnet, and one under each paw), and everything below works on whichever is shown, except clothing and the neck band, which are the goose's. The print tab (named after the character) builds the slide-in-magnet print (channels from each magnet seat to a covered mouth, flat or swept, with the tolerances as controls) and exports it as a 3MF or STLs. Load a downloaded model (STL, OBJ
 or 3MF, or drop the file on the view), prepare it (which side meets the
 goose, a width to scale it to, a plug of solid material for hollow models),
 place it on a point with sink, spin and slide controls, Fit with one click

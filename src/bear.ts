@@ -1,22 +1,23 @@
 // The bear desk character (Jerred, 2026-11-14): his "Bear V1" model, a curly
 // bear sitting up with its paws raised, simplified to 0.02 mm
 // (characters/bear/bear-source.stl), painted brown with black eyes and nose,
-// its bottom trimmed flat so it stands on a desk, and four magnet seats: in
-// the top of the head and in the mouth (the goose's 10 x 4 mm magnets), and
-// under each wrist (8 x 3 mm), so an accessory there looks held under the
-// paws. Each seat has a slide-in channel with a key that fills it, as on the
-// goose and the otter (src/desk-character.ts). Pure (no Node APIs): the CLI
-// (build-character.ts) makes the app's bear files from the source model, and
-// the app builds the slide-in print from those files with the same code.
+// its bottom trimmed flat so it stands on a desk, and three magnets: one in
+// the top of the head (the goose's 10 x 4 mm) with a slide-in channel from
+// the base and a key that fills it, as on the goose and the otter
+// (src/desk-character.ts), and an 8 x 4 mm one in an open pocket under each
+// paw, glued in from below, so an accessory there looks held under the paws.
+// Pure (no Node APIs): the CLI (build-character.ts) makes the app's bear
+// files from the source model, and the app builds the slide-in print from
+// those files with the same code.
 
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import type { IndexedMesh } from './stl.ts';
 import type { Material } from './threemf-write.ts';
 import type { MagnetVoid } from './voids.ts';
 import type { FitProfile } from './fit.ts';
-import { DEFAULT_PROFILE, fromManifoldTagged, manifold, toManifoldTagged } from './fit.ts';
+import { DEFAULT_PROFILE, frameAt, fromManifoldTagged, manifold, toManifoldTagged } from './fit.ts';
 import { DEFAULT_SLOTS, outerFace, seatSolid, type SlotOptions, type V3 } from './slots.ts';
-import { buildCharacterSlots, cropMesh, faceData, modeFilter, smoothBorders, patchNormal, placeSeat, rayHit, SEAT_SKIN, seatFromPoint, watershed, type ChannelPlan, type CharacterSlotsBuild } from './desk-character.ts';
+import { add, buildCharacterSlots, cropMesh, cross, faceData, modeFilter, patchNormal, placeSeat, rayHit, SEAT_SKIN, seatFromPoint, smoothBorders, unit, watershed, type ChannelPlan, type CharacterSlotsBuild } from './desk-character.ts';
 
 /** mm cut off the bottom of the source model: the rounded seat, feet and tail tip become one flat footing. */
 export const BEAR_TRIM = 2.5;
@@ -69,14 +70,17 @@ export function paintBear(mesh: IndexedMesh): Uint8Array {
 
 // ---------- magnet seats ----------
 
-/** Where each wrist seat sits, front to back (trimmed frame): under the forearm just behind the hanging paw. */
-export const WRIST_Y = 15;
+/** The paws take 8 x 4 mm magnets in open pockets (8.2 x 4.2: the magnet and 0.1 mm a side). */
+export const PAW_SEAT = { diameter: 8.2, depth: 4.2 };
 /**
- * The wrists take 8 x 3 mm magnets: the left forearm joins the body through
- * a neck too narrow for a 10 mm magnet to slide back through with any wall
- * left (scanned 2026-11-15); an 8 mm one clears it by about a millimetre.
+ * Where each paw's pocket is centred (x, y; trimmed frame, the bear's own
+ * left is +x), from a scan of the undersides (2026-11-15): the spot where a
+ * pocket square to the underside keeps at least 1.2 mm of plastic round and
+ * over the magnet and the underside is most even across it. A 10 x 4 mm
+ * magnet keeps 1.2 mm in only a few spots, 5.8 mm up inside the paw: the
+ * forearms are about 13 mm across.
  */
-export const WRIST_SEAT = { diameter: 8.2, depth: 3.2 };
+export const PAWS: Record<string, [number, number]> = { left_paw: [48.5, 14.5], right_paw: [25.5, 12] };
 
 /** The candidate seat with the least plastic over its centre: where the curly surface is flattest across the magnet. */
 function flattest(seats: MagnetVoid[]): MagnetVoid {
@@ -84,16 +88,36 @@ function flattest(seats: MagnetVoid[]): MagnetVoid {
 }
 
 /**
- * The four seats, found on the trimmed model:
+ * An open pocket under a paw at (x, y): its axis square to the underside
+ * there (a plane fitted across the magnet), its mouth level with the
+ * underside's highest point across the magnet, so the magnet sits wholly
+ * inside the paw and the pocket opens through the lower curls round it.
+ */
+export function pawPocket(mesh: IndexedMesh, x: number, y: number, seat = PAW_SEAT): MagnetVoid {
+  const r = seat.diameter / 2;
+  const fit = patchNormal(mesh, [x, y, 85], [0, 0, 1], [1, 0, 0], [0, 1, 0], r + 0.5);
+  const axis = fit.normal;
+  const e0 = unit(cross(Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], axis)), e1 = cross(axis, e0);
+  // how far out along the axis the underside is, across the magnet: the mouth goes at the innermost
+  let inner = Infinity;
+  for (const rr of [0, r / 2, r]) for (let j = 0; j < (rr ? 16 : 1); j++) {
+    const th = (j / 16) * Math.PI * 2;
+    const o = add(add(add(fit.point, axis, 15), e0, rr * Math.cos(th)), e1, rr * Math.sin(th));
+    const hit = rayHit(mesh, o, [-axis[0], -axis[1], -axis[2]]);
+    if (hit.face >= 0) inner = Math.min(inner, 15 - hit.t);
+  }
+  const center = add(fit.point, axis, inner);
+  return { center, faceCenter: center, axis, diameter: seat.diameter, depth: seat.depth, mode: 'open', floor: add(center, axis, -seat.depth), wallFaces: 0 };
+}
+
+/**
+ * The three seats, found on the trimmed model:
  * - head: on the crown, axis straight up, where the curls are flattest
  *   across the magnet (the top is lumpy, so the very highest curl would
- *   leave 4 to 6 mm of plastic over the magnet's centre);
- * - mouth: in the front of the muzzle under the nose, axis square to it
- *   there (forward and a little down), where the beard is flattest, so a
- *   held thing crosses the mouth;
- * - left_wrist, right_wrist (the bear's own left is +x): under each forearm
- *   where it leaves the hanging paw, axis straight down, so an accessory
- *   there sits under the paw; 8 x 3 mm magnets (WRIST_SEAT).
+ *   leave 4 to 6 mm of plastic over the magnet's centre), sealed under the
+ *   skin and reached by a slide-in channel;
+ * - left_paw, right_paw: open pockets under each paw (PAWS), 8 x 4 mm,
+ *   glued in from below.
  */
 export function bearSeats(mesh: IndexedMesh): Record<string, MagnetVoid> {
   // the crown: the head's top within 3 mm of its highest point
@@ -106,22 +130,14 @@ export function bearSeats(mesh: IndexedMesh): Record<string, MagnetVoid> {
   }
   const zTop = Math.max(...tops.map((t) => t.z));
   const head = flattest(tops.filter((t) => t.z > zTop - 3).map((t) => placeSeat(crown, t.q, [0, 0, 1])));
-  // the mouth: round the face's middle (x 37.3), 79.5 to 83.5 mm up, under the nose
-  const muzzle = cropMesh(mesh, [15, -60, 55], [60, 30, 100]);
-  const mouths: MagnetVoid[] = [];
-  for (let x = 35.3; x <= 39.31; x += 0.5) for (let z = 79.5; z <= 83.51; z += 0.5) {
-    const at = patchNormal(muzzle, [x, 0, z], [0, 1, 0], [1, 0, 0], [0, 0, 1], 4);
-    mouths.push(placeSeat(muzzle, at.point, [0, at.normal[1], at.normal[2]], SEAT_SKIN, undefined, 15));
-  }
-  const mouth = flattest(mouths);
-  // the wrists: the forearm's middle across (from its sides 60 mm up), its underside from below
-  const wrist = (x0: number, x1: number) => {
-    const a = rayHit(mesh, [x0, WRIST_Y, 60], [1, 0, 0]), b = rayHit(mesh, [x1, WRIST_Y, 60], [-1, 0, 0]);
-    const x = (x0 + a.t + x1 - b.t) / 2;
-    const under = rayHit(mesh, [x, WRIST_Y, 40], [0, 0, 1]);
-    return placeSeat(mesh, [x, WRIST_Y, 40 + under.t], [0, 0, -1], SEAT_SKIN, WRIST_SEAT, 6, true);
-  };
-  return { head, mouth, left_wrist: wrist(37.5, 60), right_wrist: wrist(15, 37) };
+  const arms = cropMesh(mesh, [10, -10, 35], [70, 40, 75]);
+  const paws = Object.fromEntries(Object.entries(PAWS).map(([name, [x, y]]) => [name, pawPocket(arms, x, y)]));
+  return { head, ...paws };
+}
+
+/** The cutter for an open pocket: the seat, and on out through the surface round its mouth. */
+function openPocket(M: Awaited<ReturnType<typeof manifold>>['Manifold'], p: MagnetVoid, reach = 10): ManifoldT {
+  return M.cylinder(p.depth + reach, p.diameter / 2, p.diameter / 2, 64, false).translate([0, 0, -p.depth]).transform(frameAt(p.center, p.axis) as any);
 }
 
 // ---------- the body ----------
@@ -152,10 +168,16 @@ export async function buildBearBody(source: IndexedMesh, paint: Uint8Array, log 
   const points = bearSeats(trimmed.mesh);
   const voids: ManifoldT[] = [];
   for (const [name, p] of Object.entries(points)) {
-    const seat = seatFromPoint(name, p);
-    voids.push(seatSolid(Manifold, seat, 0, outerFace(seat, p.axis)));
     const f = (v: readonly number[]) => v.map((x) => x.toFixed(1)).join(', ');
-    log(`  ${name.padEnd(11)} seat ${p.diameter} x ${p.depth} mm, face at (${f(p.faceCenter!)}), axis (${p.axis.map((x) => x.toFixed(3)).join(', ')}), skin ${p.skin!.toFixed(2)} mm at the centre (${SEAT_SKIN} least)`);
+    const where = `${name.padEnd(9)} ${p.mode === 'open' ? 'open pocket' : 'seat'} ${p.diameter} x ${p.depth} mm, face at (${f(p.faceCenter!)}), axis (${p.axis.map((x) => x.toFixed(3)).join(', ')})`;
+    if (p.mode === 'open') {
+      voids.push(openPocket(Manifold, p));
+      log(`  ${where}`);
+    } else {
+      const seat = seatFromPoint(name, p);
+      voids.push(seatSolid(Manifold, seat, 0, outerFace(seat, p.axis)));
+      log(`  ${where}, skin ${p.skin!.toFixed(2)} mm at the centre (${SEAT_SKIN} least)`);
+    }
   }
   const body = solid.subtract(Manifold.union(voids));
   const out = fromManifoldTagged(body, firstID, BEAR_MATERIALS.length, BROWN);
@@ -163,29 +185,16 @@ export async function buildBearBody(source: IndexedMesh, paint: Uint8Array, log 
   return { body, solid, faceMaterial: out.faceMaterial, mesh: out.mesh, profile, firstID };
 }
 
-// ---------- slide-in channels ----------
+// ---------- slide-in channel ----------
 
 /**
- * How each channel runs (trimmed frame), chosen by scanning the body
- * (2026-11-15) for a route that opens once and keeps its walls:
- * - head: straight down through the head and the back of the body to the
- *   base, behind the wrists' channels (a 111 mm key, like the otter's);
- * - mouth: straight down and back from the seat to the underside of the
- *   beard, where the key sits flush under the chin (a channel to the base
- *   would have to cross the head's);
- * - wrists: each magnet slides level back out of its forearm, turns in
- *   behind the arm (the left arm joins the body through a narrow neck, so
- *   its route bends twice) and sinks a little, and from there the channel
- *   runs straight down to the base; the key fills that straight part, so a
- *   drop of glue holds each wrist magnet in its seat.
- * The via points start level with each wrist seat's centre (the seats as
- * bearSeats places them); move them with the seats.
+ * The head's channel: from the crown down and back through the body to
+ * the base, scanned (2026-11-15) to open once and keep 1.2 mm of
+ * wall; its key is about 111 mm long, like the otter's. The paws' pockets
+ * are open, so they have no channel.
  */
 export const BEAR_PLANS: Record<string, ChannelPlan> = {
   head: { mouth: [26, 58, 0] },
-  mouth: { mouth: [37.3, 14, 74.3], levelEnd: false },
-  left_wrist: { mouth: [40, 47, 0], via: [[47, 22.5, 57.7], [44.5, 25.5, 57], [42.5, 29, 55]] },
-  right_wrist: { mouth: [26, 36, 0], via: [[26.9, 20.5, 58.8], [27.9, 26, 56.8]] },
 };
 
 /** The slide-in print from the app's bear (`body`, seats already cut, and its profile). */
