@@ -480,7 +480,7 @@ the art as a 3MF, magnets of the goose's size in the top of the head and
 the chest between the paws with slide-in channels from the bottom and keys
 as on the goose, the base cropped flat, and the otter in the app as a
 second character to make accessories for. The source is
-`characters/otter/otter-source.stl`; `npm run build-otter` (src/build-otter.ts,
+`characters/otter/otter-source.stl`; `npm run build-otter` (src/build-character.ts,
 geometry in src/otter.ts) makes `goose/otter.stl`, `otter-colors.json` and
 `otter-profile.json`, which the app serves beside the goose.
 
@@ -536,10 +536,68 @@ character; a loaded accessory stays and is made again for the new first
 position. The otter has no clothing or neck band (both are shaped for the
 goose's long neck): the Clothing tab is disabled and the neck position
 hidden. The print tab is named after the character; for the otter it builds
-`buildOtterSlots` from the otter in the view and exports the painted print.
+the otter's channels (`OTTER_PLANS`) from the otter in the view and exports
+the painted print.
 The profile carries `forward` (-y) for the otter, which the neck code and
 the default spin use where the goose has a beak. Library builds record their
 character and reopen on it.
+
+## The bear (Jerred, 2026-11-14)
+
+Jerred sent "Bear V1" (a curly bear sitting up with its paws raised, 65 x
+80 x 118 mm, 37 MB) and asked for it as a third character, with magnets in
+the mouth, the top of the head and the wrists, "so it looks like he is
+holding things under his paws". There was no concept art this time. After
+the first version (2026-11-15) he changed how they go in: keep the head's
+slide-in channel, drop the mouth magnet, and put the paw magnets in from
+the bottom in open pockets, glued, with no channel; 10 x 4 mm at most, 8 x
+3 or 8 x 4 in the paws.
+
+**Model.** Simplified with Manifold to 0.02 mm (191,350 triangles, 9.6 MB;
+nothing visible changes) as `characters/bear/bear-source.stl`. `npm run
+build-bear` (src/build-character.ts, geometry in src/bear.ts) makes
+`goose/bear.stl`, `bear-colors.json` and `bear-profile.json`.
+
+**Paint.** Brown `#8b5a2b` (filament 1) with black (2) for the eyes and
+nose, chosen without art. The same curvature watershed as the otter's (now
+in src/desk-character.ts) from seed rays, so the black stops on the crease
+round the nose and round each eyeball; a mode filter and a 0.5 mm
+area-majority smoothing (`smoothBorders`) take the teeth off the borders.
+
+**Base.** 2.5 mm off the bottom gives one flat footing of 2,221 mm2; the
+cut is brown.
+
+**Head.** The goose's 10.2 x 4.2 seat in the middle of the top of the
+head (`HEAD_TOP`, (34, 38): the centroid of the head's section 104 to 110
+mm up; the head leans, so the face is centred on x 37.3 instead), axis up,
+under at least 1.2 mm of plastic (3.7 mm at the centre, which is on a
+curl). Jerred asked for it there (2026-11-15) after the first version put
+it 2 mm to the side and 4 mm forward, on the flattest spot of the crown.
+Its channel (`BEAR_PLANS`) runs straight down through the middle of the
+head and body to the base under it: one opening, 1.2 mm of wall
+everywhere, and the magnet slides the whole way (the test sweeps it). The
+key is about 109 mm long (11 cm3); brim it when it prints upright.
+
+**Paws.** Open pockets, 8.2 x 4.2 for 8 x 4 mm magnets, pushed in from
+below and glued. Each pocket's axis is square to the underside there (a
+plane fitted across the magnet, 20 degrees or so off straight down), and
+its mouth is level with the underside's highest point across the magnet,
+so the magnet sits wholly inside the paw and the pocket opens through the
+lower curls round it (up to 1.8 mm on the left, 3.6 on the right). The
+spots (`PAWS`: left (48.5, 14.5), right (25.5, 12)) come from a scan of the
+undersides for at least 1.2 mm of plastic round and over the pocket and
+the most even underside. The forearms are only about 13 mm across: 10 x 4
+keeps 1.2 mm in a handful of spots, 5.8 mm up inside the paw, so 8 x 4 it
+is (8 x 3 gains no wall, only depth). The fit fills the pocket from its
+mouth inward, so an accessory there grows a short boss up into the opening
+and its magnet meets the paw's across the clearance. The pockets face
+down: the slicer's support under the paws will reach into them.
+
+**App.** `bear` in `CHARACTERS`; the otter and the bear share the print tab
+code through `SLIDE_IN_CHARACTERS` (plans, materials, title). The paw
+points are `mode: 'open'`, so they have no channel and stay open in the
+print; the accessory pockets follow each point's own seat, so a paw
+accessory gets an 8 mm pocket by default.
 
 ## Still needed from Jerred
 

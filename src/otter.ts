@@ -4,20 +4,23 @@
 // stands on a desk, a magnet seat in the top of the head and one on the chest
 // between the paws (the same 10 x 4 mm magnets as the goose), and a slide-in
 // channel from the flat base up to each seat with a key that fills it, as on
-// the goose (src/slots.ts). Pure (no Node APIs): the CLI (build-otter.ts)
+// the goose (src/slots.ts). Pure (no Node APIs): the CLI (build-character.ts)
 // makes the app's otter files from the source model, and the app builds the
 // slide-in print from those files with the same code.
 
 import type { Manifold as ManifoldT } from 'manifold-3d';
 import type { IndexedMesh } from './stl.ts';
-import type { BuildObject, Material, MeshPart } from './threemf-write.ts';
-import type { VoidPrimitive } from './map-voids.ts';
+import type { BuildObject, Material } from './threemf-write.ts';
 import type { MagnetVoid } from './voids.ts';
 import type { FitProfile } from './fit.ts';
-import { DEFAULT_PROFILE, fromManifold, fromManifoldTagged, manifold, toManifoldTagged } from './fit.ts';
-import { buildChannel, DEFAULT_SLOTS, outerFace, seatSolid, type Channel, type SlotOptions, type V3 } from './slots.ts';
-import { layFlat } from './slots-build.ts';
-import { CORNERS, encodePaint } from './paint-tree.ts';
+import { DEFAULT_PROFILE, fromManifoldTagged, manifold, toManifoldTagged } from './fit.ts';
+import { DEFAULT_SLOTS, outerFace, seatSolid, type Channel, type SlotOptions, type V3 } from './slots.ts';
+import {
+  buildCharacterSlots, characterKeyDown, characterPaint, faceData, layoutCharacter, modeFilter, placeSeat, rayHit, SEAT_SKIN, seatFromPoint, unit, watershed,
+  wholeFaceCodes as codesOf, type ChannelPlan, type CharacterSlotsBuild,
+} from './desk-character.ts';
+
+export { MAGNET_SEAT, SEAT_SKIN, placeSeat, rayHit, seatFromPoint } from './desk-character.ts';
 
 /** mm cut off the bottom of the source model: the feet soles, belly and tail tip become one flat footing (two pieces: body and tail). */
 export const OTTER_TRIM = 2.5;
@@ -29,78 +32,6 @@ export const OTTER_MATERIALS: Material[] = [
   { name: 'black', color: '#1a1a1a' },
 ];
 export const DARK = 0, LIGHT = 1, BLACK = 2;
-
-/** The goose's magnets: 10 x 4 mm discs in 10.2 x 4.2 mm seats. */
-export const MAGNET_SEAT = { diameter: 10.2, depth: 4.2 };
-/** least plastic over a seat's outer face, anywhere over the magnet, mm */
-export const SEAT_SKIN = 1.2;
-
-// ---------- mesh helpers ----------
-
-interface FaceData {
-  normals: Float32Array;
-  centroids: Float32Array;
-  adjacency: number[][];
-  /** mean normal change per unit distance to the edge neighbours: + convex, − concave */
-  curvature: Float32Array;
-}
-
-function faceData(mesh: IndexedMesh): FaceData {
-  const P = mesh.positions, T = mesh.triangles, n = T.length / 3;
-  const normals = new Float32Array(n * 3), centroids = new Float32Array(n * 3);
-  for (let t = 0; t < n; t++) {
-    const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
-    const u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], v = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
-    const nx = u[1] * v[2] - u[2] * v[1], ny = u[2] * v[0] - u[0] * v[2], nz = u[0] * v[1] - u[1] * v[0];
-    const l = Math.hypot(nx, ny, nz) || 1;
-    normals[t * 3] = nx / l; normals[t * 3 + 1] = ny / l; normals[t * 3 + 2] = nz / l;
-    for (let k = 0; k < 3; k++) centroids[t * 3 + k] = (P[a + k] + P[b + k] + P[c + k]) / 3;
-  }
-  const edges = new Map<number, number>();
-  const adjacency: number[][] = Array.from({ length: n }, () => []);
-  const nv = P.length / 3;
-  for (let t = 0; t < n; t++) for (let k = 0; k < 3; k++) {
-    const a = T[t * 3 + k], b = T[t * 3 + (k + 1) % 3];
-    const key = a < b ? a * nv + b : b * nv + a;
-    const o = edges.get(key);
-    if (o === undefined) edges.set(key, t); else { adjacency[t].push(o); adjacency[o].push(t); }
-  }
-  const curvature = new Float32Array(n);
-  for (let t = 0; t < n; t++) {
-    let s = 0;
-    for (const o of adjacency[t]) {
-      const d0 = centroids[o * 3] - centroids[t * 3], d1 = centroids[o * 3 + 1] - centroids[t * 3 + 1], d2 = centroids[o * 3 + 2] - centroids[t * 3 + 2];
-      const dl2 = d0 * d0 + d1 * d1 + d2 * d2 || 1;
-      s += ((normals[o * 3] - normals[t * 3]) * d0 + (normals[o * 3 + 1] - normals[t * 3 + 1]) * d1 + (normals[o * 3 + 2] - normals[t * 3 + 2]) * d2) / dl2;
-    }
-    curvature[t] = s / Math.max(1, adjacency[t].length);
-  }
-  return { normals, centroids, adjacency, curvature };
-}
-
-/** The first face a ray hits: distance along the (unit) direction and the face, or face −1. */
-export function rayHit(mesh: IndexedMesh, o: V3, d: V3): { t: number; face: number } {
-  const P = mesh.positions, T = mesh.triangles;
-  let best = Infinity, face = -1;
-  for (let f = 0; f < T.length; f += 3) {
-    const a = T[f] * 3, b = T[f + 1] * 3, c = T[f + 2] * 3;
-    const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2];
-    const e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
-    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
-    const det = e1x * px + e1y * py + e1z * pz;
-    if (Math.abs(det) < 1e-12) continue;
-    const inv = 1 / det;
-    const sx = o[0] - P[a], sy = o[1] - P[a + 1], sz = o[2] - P[a + 2];
-    const u = (sx * px + sy * py + sz * pz) * inv;
-    if (u < 0 || u > 1) continue;
-    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
-    const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
-    if (v < 0 || u + v > 1) continue;
-    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
-    if (t > 0 && t < best) { best = t; face = f / 3; }
-  }
-  return { t: best, face };
-}
 
 // ---------- paint ----------
 
@@ -133,34 +64,14 @@ const inMouthZone = (c: Float32Array, t: number) => c[t * 3 + 1] < 14 && c[t * 3
  * groove under the nose; a mode filter then smooths every border.
  */
 export function paintOtter(mesh: IndexedMesh): Uint8Array {
-  const { centroids: cen, adjacency: adj, curvature: curv } = faceData(mesh);
+  const fd = faceData(mesh);
+  const { centroids: cen, adjacency: adj, curvature: curv } = fd;
   const n = mesh.triangles.length / 3;
-  // the barrier: the strongest bend in a face's ring, so a hairline crease still stops the flood
-  const bar = new Float32Array(n);
-  for (let t = 0; t < n; t++) { let b = Math.abs(curv[t]); for (const o of adj[t]) b = Math.max(b, Math.abs(curv[o])); bar[t] = b; }
   const cast = (dir: string, a: number, b: number) => {
     const [o, d]: [V3, V3] = dir === 'F' ? [[a, -50, b], [0, 1, 0]] : dir === 'B' ? [[a, 200, b], [0, -1, 0]] : dir === 'U' ? [[a, b, 250], [0, 0, -1]] : dir === 'L' ? [[-50, a, b], [1, 0, 0]] : [[150, a, b], [-1, 0, 0]];
     return rayHit(mesh, o, d).face;
   };
-  const label = new Int8Array(n).fill(-1);
-  // a binary min-heap of [barrier, face, label]
-  const heap: [number, number, number][] = [];
-  const push = (e: [number, number, number]) => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
-  const pop = () => {
-    const top = heap[0], last = heap.pop()!;
-    if (heap.length) {
-      heap[0] = last;
-      for (let i = 0; ;) { const l = 2 * i + 1, r = l + 1; let s = i; if (l < heap.length && heap[l][0] < heap[s][0]) s = l; if (r < heap.length && heap[r][0] < heap[s][0]) s = r; if (s === i) break; [heap[s], heap[i]] = [heap[i], heap[s]]; i = s; }
-    }
-    return top;
-  };
-  for (const [l, dir, a, b] of SEEDS) { const f = cast(dir, a, b); if (f >= 0) push([0, f, l]); }
-  while (heap.length) {
-    const [, t, l] = pop();
-    if (label[t] >= 0) continue;
-    label[t] = l;
-    for (const o of adj[t]) if (label[o] < 0) push([bar[o], o, l]);
-  }
+  const label = watershed(fd, SEEDS.map(([l, dir, a, b]) => ({ face: cast(dir, a, b), label: l })));
   const out = new Uint8Array(n);
   for (let t = 0; t < n; t++) out[t] = label[t] < 0 ? DARK : label[t];
 
@@ -192,79 +103,14 @@ export function paintOtter(mesh: IndexedMesh): Uint8Array {
     if (comp.length >= 6) for (const t of comp) { out[t] = BLACK; smile.push(t); }
   }
   for (const t of smile) for (const o of adj[t]) if (out[o] === LIGHT && inMouthZone(cen, o)) out[o] = BLACK;
-  // a mode filter: a face whose neighbours mostly share another colour takes it (spikes off a border, notches into it)
-  for (let pass = 0; pass < 2; pass++) {
-    const prev = out.slice();
-    for (let t = 0; t < n; t++) {
-      const [a, b, c] = adj[t];
-      if (c === undefined) continue;
-      const la = prev[a], lb = prev[b], lc = prev[c];
-      const major = la === lb || la === lc ? la : lb === lc ? lb : prev[t];
-      if (major !== prev[t]) out[t] = major;
-    }
-  }
+  modeFilter(fd, out);
   return out;
 }
 
 /** Whole-face slicer paint codes: the palette index m is filament m + 1, and the dark brown (filament 1) is the object's own, so it carries none. */
-export function wholeFaceCodes(faceMaterial: Uint8Array): string[] {
-  const codes = OTTER_MATERIALS.map((_, m) => (m === 0 ? '' : encodePaint({ v: CORNERS, material: m }, (k) => (k === 0 ? 0 : k + 1))));
-  return Array.from(faceMaterial, (m) => codes[m] ?? '');
-}
+export const wholeFaceCodes = (faceMaterial: Uint8Array): string[] => codesOf(faceMaterial);
 
 // ---------- magnet seats ----------
-
-const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const add = (a: V3, b: V3, s = 1): V3 => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
-const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-const unit = (a: V3): V3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
-
-/** The seat as the slot code knows it, from a profile point: a cylinder whose first axis is as near x as the axis allows. */
-export function seatFromPoint(name: string, p: MagnetVoid): VoidPrimitive {
-  const axis = unit(p.axis);
-  const helper: V3 = Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-  const e0 = unit(sub(helper, [axis[0] * dot(helper, axis), axis[1] * dot(helper, axis), axis[2] * dot(helper, axis)]));
-  const e1 = cross(axis, e0);
-  const face = p.faceCenter ?? p.center;
-  return { name, anchor: 'otter', kind: 'cylinder', center: add(face, axis, -p.depth / 2), axes: [e0, e1, axis], size: [p.diameter, p.diameter, p.depth], mesh: { positions: new Float32Array(0), triangles: new Uint32Array(0) } };
-}
-
-/**
- * Places a seat under the surface point `q0`, its axis `n` (outward): sinks
- * the seat's outer face until the plastic over it is at least `skin`
- * everywhere over the magnet (rays along −n over the face's disc).
- */
-export function placeSeat(mesh: IndexedMesh, q0: V3, n: V3, skin = SEAT_SKIN, seat = MAGNET_SEAT): MagnetVoid {
-  const axis = unit(n);
-  const helper: V3 = Math.abs(axis[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-  const e0 = unit(sub(helper, [axis[0] * dot(helper, axis), axis[1] * dot(helper, axis), axis[2] * dot(helper, axis)]));
-  const e1 = cross(axis, e0);
-  // surface heights over the disc, relative to q0 along the axis
-  let lowest = Infinity;
-  const r = seat.diameter / 2 + 0.2;
-  for (const rr of [0, r / 2, r]) for (let j = 0; j < (rr ? 24 : 1); j++) {
-    const th = (j / 24) * Math.PI * 2;
-    const p = add(add(q0, e0, rr * Math.cos(th)), e1, rr * Math.sin(th));
-    const hit = rayHit(mesh, add(p, axis, 30), [-axis[0], -axis[1], -axis[2]]);
-    if (hit.face >= 0) lowest = Math.min(lowest, 30 - hit.t);
-  }
-  const face = add(q0, axis, lowest - skin);
-  const centreHit = rayHit(mesh, add(face, axis, 30), [-axis[0], -axis[1], -axis[2]]);
-  const skinAtCentre = 30 - centreHit.t;
-  return {
-    center: add(face, axis, skinAtCentre),
-    floor: add(face, axis, -seat.depth),
-    axis,
-    mode: 'embedded',
-    faceCenter: face,
-    skin: skinAtCentre,
-    diameter: seat.diameter,
-    depth: seat.depth,
-    shape: 'cylinder',
-    wallFaces: 0,
-  };
-}
 
 /** Least-squares surface normal over the patch of `mesh` a set of rays from the front hits: outward, unit. */
 function frontNormal(mesh: IndexedMesh, x0: number, z0: number, half: number): { point: V3; normal: V3 } {
@@ -355,45 +201,18 @@ export const OTTER_MOUTHS: Record<string, V3> = {
   head: [34, 70.5, 0],
   chest: [34, 45, 0],
 };
+/** The channel plans: straight from each seat to its mouth in the base. */
+export const OTTER_PLANS: Record<string, ChannelPlan> = Object.fromEntries(Object.entries(OTTER_MOUTHS).map(([name, mouth]) => [name, { mouth }]));
 
-export interface OtterSlotsBuild {
-  options: SlotOptions;
-  materials: Material[];
-  /** the otter with its seats and channels cut */
-  body: ManifoldT;
-  /** the otter before any void was cut */
-  bodySolid: ManifoldT;
-  channels: Record<string, Channel>;
-  notes: string[];
-}
+export type OtterSlotsBuild = CharacterSlotsBuild;
 
 /**
  * The slide-in print from the app's otter (`body`, seats already cut, and its
  * profile). The keys fill the channels from the base up to the magnet and are
  * flush with the base. No tongue: nothing covers these mouths but the desk.
  */
-export async function buildOtterSlots(body: ManifoldT, profile: FitProfile, options: SlotOptions = DEFAULT_SLOTS, log = (s: string) => console.log(s)): Promise<OtterSlotsBuild> {
-  const { Manifold } = await manifold();
-  const notes: string[] = [];
-  // the solid otter: the seats filled again (a hair proud of their walls, so no sliver is left)
-  const seats = Object.entries(profile.points).filter(([name]) => OTTER_MOUTHS[name]).map(([name, p]) => ({ name, p, seat: seatFromPoint(name, p) }));
-  const fill = seats.map(({ seat, p }) => seatSolid(Manifold, seat, 0.02, outerFace(seat, p.axis)).translate(p.axis.map((v) => v * 0.02) as V3));
-  const bodySolid = fill.length ? Manifold.union([body, ...fill]) : body;
-  const channels: Record<string, Channel> = {};
-  for (const { name, p, seat } of seats) {
-    const ch = buildChannel(Manifold, { seat, mouth: OTTER_MOUTHS[name], drop: 0, tongue: false }, p.axis, bodySolid, { ...options, tongue: null });
-    channels[name] = ch;
-    const outside = ch.cut.subtract(bodySolid).decompose().filter((m) => m.volume() > 0.3);
-    log(`  ${name.padEnd(6)} channel ${ch.length.toFixed(1)} mm to the base at (${OTTER_MOUTHS[name].join(', ')}), bore ${ch.bore[0].toFixed(1)} x ${ch.bore[1].toFixed(1)} mm, ${outside.length} opening${outside.length === 1 ? '' : 's'}; key ${ch.key.volume().toFixed(0)} mm³`);
-    if (outside.length !== 1) notes.push(`${name}: the channel opens ${outside.length} times; it should open once, in the base.`);
-  }
-  const cuts = Object.values(channels).map((c) => c.cut);
-  const names = Object.keys(channels);
-  for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
-    if (channels[names[i]].cut.intersect(channels[names[j]].cut).volume() > 1e-6) notes.push(`The ${names[i]} and ${names[j]} channels meet.`);
-  }
-  const cut = cuts.length ? body.subtract(Manifold.union(cuts)) : body;
-  return { options, materials: OTTER_MATERIALS, body: cut, bodySolid, channels, notes };
+export function buildOtterSlots(body: ManifoldT, profile: FitProfile, options: SlotOptions = DEFAULT_SLOTS, log = (s: string) => console.log(s)): Promise<OtterSlotsBuild> {
+  return buildCharacterSlots(body, profile, OTTER_PLANS, OTTER_MATERIALS, options, log);
 }
 
 /**
@@ -401,30 +220,10 @@ export async function buildOtterSlots(body: ManifoldT, profile: FitProfile, opti
  * upright version and the swept keys stand as they sit in the otter, the end
  * that is part of the base on the plate, so it has the base's finish.
  */
-export function otterKeyDown(ch: Channel): V3 {
-  if (ch.options.style === 'flat' && ch.options.keyEnd === 'square') return ch.frame.through;
-  return [0, 0, -1];
-}
+export const otterKeyDown = (ch: Channel): V3 => characterKeyDown(ch);
 
 /** The print: the otter where it stands, the keys side by side beside it, long sides along y. `otter` is the cut body's mesh and paint. */
-export function layoutOtter(b: OtterSlotsBuild, otter: { mesh: IndexedMesh; faceMaterial: Uint8Array }): BuildObject[] {
-  const bb = b.body.boundingBox();
-  const yMid = (bb.min[1] + bb.max[1]) / 2;
-  let x = bb.max[0] + 15;
-  const keys = Object.entries(b.channels).map(([name, ch]) => {
-    let flat = layFlat(ch.key, otterKeyDown(ch), 0, 0);
-    let kb = flat.boundingBox();
-    if (kb.max[0] - kb.min[0] > kb.max[1] - kb.min[1]) { flat = flat.rotate([0, 0, 90]); kb = flat.boundingBox(); }
-    const w = kb.max[0] - kb.min[0];
-    flat = flat.translate([x - kb.min[0], yMid - (kb.min[1] + kb.max[1]) / 2, -kb.min[2]]);
-    x += w + 8;
-    const part: MeshPart = { name: `key ${name}`, mesh: fromManifold(flat), material: DARK };
-    return { name: `key ${name}`, parts: [part] };
-  });
-  return [{ name: 'otter', parts: [{ name: 'otter', mesh: otter.mesh, material: DARK, faceMaterial: otter.faceMaterial, paintCodes: wholeFaceCodes(otter.faceMaterial) }] }, ...keys];
-}
+export const layoutOtter = (b: OtterSlotsBuild, otter: { mesh: IndexedMesh; faceMaterial: Uint8Array }): BuildObject[] => layoutCharacter(b, otter, 'otter');
 
 /** The cut otter's mesh and paint, for export. */
-export function otterPaint(b: OtterSlotsBuild, firstID: number): { mesh: IndexedMesh; faceMaterial: Uint8Array } {
-  return fromManifoldTagged(b.body, firstID, OTTER_MATERIALS.length, DARK);
-}
+export const otterPaint = (b: OtterSlotsBuild, firstID: number): { mesh: IndexedMesh; faceMaterial: Uint8Array } => characterPaint(b, firstID);
