@@ -41,9 +41,13 @@ export interface SlotsBuild {
   notes: string[];
 }
 
-/** Where each channel comes out, chosen by scanning the body (2026-11-09): single mouth, no break-out, clear of the legs and the leg pins. */
-export const MOUTHS: Record<string, { mouth: V3; drop: number; tongue?: boolean; levelEnd?: boolean }> = {
-  head: { mouth: [131, 93, 169.5], drop: 3, tongue: true, levelEnd: false },
+/**
+ * Where each channel comes out, chosen by scanning the body (2026-11-09): single mouth, no break-out, clear of the legs and the leg pins.
+ * The head's bore follows the magnet's outline with a 7 mm flat top, and its mouth sits 0.26 mm to the goose's left of the
+ * first scan's (131, 93, 169.5), so the white face beside the beak doesn't show the channel through (2026-11-19).
+ */
+export const MOUTHS: Record<string, { mouth: V3; drop: number; tongue?: boolean; levelEnd?: boolean; fitBore?: number }> = {
+  head: { mouth: [131.26, 93.15, 169.52], drop: 3, tongue: true, levelEnd: false, fitBore: 7 },
   left_wing: { mouth: [123, 155, 38.5], drop: 0 },
   right_wing: { mouth: [95, 144, 37.2], drop: 0 },
 };
@@ -88,7 +92,7 @@ export async function buildSlots(parts: Part[], voidParts: Part[], options: Slot
     let outward = seat.axes[axisK];
     const want: V3 = seat.kind === 'cylinder' ? [0, 0, 1] : [seat.center[0] > mid ? 1 : -1, 0, 0];
     if (outward[0] * want[0] + outward[1] * want[1] + outward[2] * want[2] < 0) outward = outward.map((v) => -v) as V3;
-    const spec: ChannelSpec = { seat, mouth: place.mouth, drop: place.drop, tongue: place.tongue, levelEnd: place.levelEnd };
+    const spec: ChannelSpec = { seat, mouth: place.mouth, drop: place.drop, tongue: place.tongue, levelEnd: place.levelEnd, fitBore: place.fitBore };
     const ch = buildChannel(Manifold, spec, outward, bodySolid, options);
     channels[name] = ch;
     cuts.push(ch.cut);

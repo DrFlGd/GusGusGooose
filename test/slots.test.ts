@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { read3mf } from '../src/threemf.ts';
 import { buildSlots, keyDown, layoutBuild } from '../src/slots-build.ts';
-import { DEFAULT_SLOTS, type SlotOptions } from '../src/slots.ts';
+import { DEFAULT_SLOTS, sweep, type SlotOptions, type V3 } from '../src/slots.ts';
 import { fromManifold, manifold } from '../src/fit.ts';
 
 const parts = read3mf('goose/goose.3mf'), voidParts = read3mf('goose/goose-voids.3mf');
@@ -62,7 +62,44 @@ for (const [version, built] of Object.entries(builds)) {
       }
     }
   });
+  test(`${version}: each magnet slides from its mouth all the way into its seat`, async () => {
+    const b = await built;
+    const { Manifold } = await manifold();
+    for (const [name, ch] of Object.entries(b.channels)) {
+      const path = ch.spec.drop > 0 ? [ch.junction, ch.spec.mouth] : [ch.spec.mouth];
+      const travel = sweep(Manifold, ch.magnet, ch.spec.seat.center, path);
+      assert.ok(travel.intersect(b.bodySolid).subtract(ch.cut).volume() < 1e-6, `${name}: the magnet slides all the way in`);
+    }
+  });
 }
+
+test('flat channels: the head wall beside the mouth stays thick enough not to show through (2026-11-19)', async () => {
+  // Jerred's print showed the channel through the white face above the beak, on both sides: the rectangular
+  // bore's upper corners left 0.2-0.6 mm of wall in the first 3 mm. The bore now follows the magnet's own
+  // outline with a flat strip on top, and the mouth sits 0.26 mm to the goose's left, which balances the sides.
+  const { Manifold } = await manifold();
+  for (const version of ['flat on its side', 'flat upright']) {
+    const b = await builds[version];
+    const ch = b.channels.head;
+    const m = ch.spec.mouth, n = ch.direction;
+    const box = Manifold.cube([40, 40, 40], true).translate(m);
+    const outside = box.subtract(b.bodySolid);
+    // the slab of the channel from `from` to `to` mm in from the mouth
+    const slab = (from: number, to: number) => {
+      const helper: V3 = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+      const e1 = [helper[1] * n[2] - helper[2] * n[1], helper[2] * n[0] - helper[0] * n[2], helper[0] * n[1] - helper[1] * n[0]];
+      const l = Math.hypot(e1[0], e1[1], e1[2]);
+      const a: V3 = [e1[0] / l, e1[1] / l, e1[2] / l];
+      const c: V3 = [n[1] * a[2] - n[2] * a[1], n[2] * a[0] - n[0] * a[2], n[0] * a[1] - n[1] * a[0]];
+      const mid: V3 = [m[0] - n[0] * (from + to) / 2, m[1] - n[1] * (from + to) / 2, m[2] - n[2] * (from + to) / 2];
+      return Manifold.cube([60, 60, to - from], true).transform([...a, 0, ...c, 0, ...n, 0, ...mid, 1] as any);
+    };
+    for (const [from, to, least] of [[1.5, 2.5, 0.9], [2.5, 4, 1.1], [4, 6, 1.3]]) {
+      const wall = ch.cut.intersect(slab(from, to)).minGap(outside, 4);
+      assert.ok(wall >= least, `${version}: ${wall.toFixed(2)} mm of wall ${from}-${to} mm in from the head mouth (want ${least})`);
+    }
+  }
+});
 
 test('the wing mouths are clear of the legs; the head mouth is under the beak', async () => {
   const b = await builds.swept;
