@@ -78,6 +78,15 @@ export interface ChannelSpec {
   tongue?: boolean;
   /** false for a channel whose key must not take the level end (the head's runs nearly level, so it would lose the key) */
   levelEnd?: boolean;
+  /**
+   * Flat style: trim the bore's corners to the magnet's own outline seen down
+   * the channel (a tilted disc's outline has rounded ends), keeping a flat
+   * strip this wide in the middle of the outer side for the key to print on
+   * and the tongue to stand from. The corners are where the wall to the skin
+   * runs thinnest (the goose's head beside the beak). Undefined: a plain
+   * rectangle.
+   */
+  fitBore?: number;
 }
 
 export interface Channel {
@@ -209,7 +218,17 @@ export function buildChannel(M: ManifoldToplevel['Manifold'], spec: ChannelSpec,
   const bore: [number, number] = [a1 - a0, t1 - t0];
   const faceLimit = dot(add(c, outAxis, seat.size[outer.axis] / 2), outAxis); // never past the seat's outer face
   const lMouth = dot(sub(spec.mouth, junction), along);
+  // the bore square to the channel: the seat's silhouette (grown by the clearance, less any shrink) with a flat strip
+  // on the outer side, or the silhouette's bounding rectangle
   const boreSolid = (shrink: number, from: number, to: number) => {
+    if (spec.fitBore !== undefined) {
+      const mid = add(junction, across, (a0 + a1) / 2);
+      const pts = [
+        ...seatCorners(seat, options.channelClear - shrink, outer).map((p) => add(p, sub(junction, c))),
+        add(add(mid, across, -spec.fitBore / 2), through, t1 - shrink), add(add(mid, across, spec.fitBore / 2), through, t1 - shrink),
+      ].map((p) => sub(p, scale(along, dot(sub(p, junction), along))));
+      return M.hull([...pts.map((p) => add(p, along, from)), ...pts.map((p) => add(p, along, to))]);
+    }
     const w = bore[0] - 2 * shrink, h = bore[1] - 2 * shrink;
     const centre = add(add(add(junction, across, (a0 + a1) / 2), through, (t0 + t1) / 2), along, (from + to) / 2);
     return M.cube([w, h, to - from], true).transform(columnMajor([across, through, along], centre) as any);

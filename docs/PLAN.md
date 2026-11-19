@@ -464,6 +464,21 @@ beak's own magnet slot opens on that back face just below the mouth: at a
 1.2 mm offset the pocket cut into that slot by 6.7 mm3, at 2.1 mm it is
 clear (`buildSlots` reports it as a note if the tongue is moved into it).
 
+**Head mouth walls** (Jerred, 2026-11-19): his print showed the head
+channel through the white face just above the beak, on both sides. The
+rectangular bore's upper corners left 0.2-0.4 mm of wall in the first 2 mm
+in from the mouth (0.6-0.9 mm by 3-4 mm in). The disc goes down the channel
+tilted about 13 degrees, so its outline seen down the channel has rounded
+ends, not square corners: the head bore (and its key) now follows that
+outline (`ChannelSpec.fitBore`), keeping a 7 mm flat strip on top for the
+tongue and for the key to lie on to print, and the mouth moved 0.26 mm
+toward the goose's left, which evened the two sides. Walls behind the mouth:
+0.45 / 1.06 / 1.26 / 1.49 mm at 1 / 2 / 3 / 4 mm in (before 0.20 / 0.39 /
+0.62 / 0.87). The bore can't get narrower (the magnet is 10.2 mm across) and
+lowering it pushes the tongue's pocket into the beak's own magnet slot, so
+the first millimetre at the beak's edge stays thin; the beak's back covers
+most of it. The wings keep the plain rectangle.
+
 Assembly: slide each magnet up its channel (an accessory or a spare magnet
 held on the outside pulls it into the seat; a dab of glue on its outer face
 first), push the key in behind it, glue the beak on over the tongue with its
